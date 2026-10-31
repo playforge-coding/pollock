@@ -21,7 +21,10 @@ task testjs, "Run the tests under the JavaScript target with Node":
       exec "nim js -r -d:nodejs --hints:off --outdir:tests/jsout " & path
 
 task testcairo, "Run the Cairo backend tests (needs cairo through pkg-config)":
-  exec "nim c -r --hints:off -d:pollockCairo --outdir:tests/bin tests/tcairo.nim"
+  # Under ORC and refc, since the destroy hook's signature differs between them.
+  for mm in ["orc", "refc"]:
+    exec "nim c -r --hints:off --mm:" & mm &
+      " -d:pollockCairo --outdir:tests/bin tests/tcairo.nim"
 
 task samples, "Render the sample scenes with every backend that can run here into out/":
   # The Cairo backend joins in when pkg-config finds cairo.

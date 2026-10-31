@@ -12,14 +12,17 @@
 ## Cairo's own state stack holds the clip: `save` and `restore` call
 ## `cairo_save` and `cairo_restore`, and `clear` resets the clip inside a
 ## save/restore pair. The transform is mirrored in Nim and set on the
-## cairo_t before every drawing call, so a singular transform (which would put
-## the cairo_t into a permanent error state) can be skipped instead. Cairo's
+## cairo_t before every drawing call, so a singular or non-finite transform
+## (which would put the cairo_t into a permanent error state) can be skipped
+## instead. Each drawing call runs inside its own save/restore pair, so a
+## wrapped cairo_t keeps the matrix, source and line settings its owner set.
+## Cairo's
 ## errors are sticky: once a call fails the cairo_t stays unusable, so
 ## `finish` reports the failure and the caller makes a new context.
 ##
 ## Bindings cover only what the backend calls.
 
-import std/strutils
+import std/[math, strutils]
 import ../context
 
 export context
@@ -55,6 +58,7 @@ type
 const
   cairoStatusSuccess = 0.cint
   cairoFormatArgb32 = 0.cint
+  cairoFormatRgb24 = 1.cint
   cairoSurfaceTypeImage = 0.cint
   cairoOperatorSource = 1.cint
   cairoFillRuleWinding = 0.cint
@@ -91,6 +95,10 @@ proc cairoImageSurfaceGetHeight(
 proc cairoImageSurfaceGetStride(
   surface: CairoSurface
 ): cint {.importc: "cairo_image_surface_get_stride".}
+
+proc cairoImageSurfaceGetFormat(
+  surface: CairoSurface
+): cint {.importc: "cairo_image_surface_get_format".}
 
 proc cairoSurfaceGetType(
   surface: CairoSurface
@@ -134,6 +142,7 @@ proc cairoRectangle(
 ) {.importc: "cairo_rectangle".}
 
 proc cairoSetFillRule(cr: CairoHandle, rule: cint) {.importc: "cairo_set_fill_rule".}
+proc cairoGetFillRule(cr: CairoHandle): cint {.importc: "cairo_get_fill_rule".}
 proc cairoFill(cr: CairoHandle) {.importc: "cairo_fill".}
 proc cairoClip(cr: CairoHandle) {.importc: "cairo_clip".}
 proc cairoResetClip(cr: CairoHandle) {.importc: "cairo_reset_clip".}
@@ -211,13 +220,29 @@ type
 
 proc `=copy`(a: var CairoContext, b: CairoContext) {.error.}
 
-proc `=destroy`(ctx: CairoContext) =
+template releaseHandles(ctx: CairoContext) =
   if ctx.cr != nil:
+    # Pop the levels a missing `restore` left behind, so a wrapped cairo_t
+    # goes back to its owner with the stack (and clip) it came with.
+    for _ in 0 ..< ctx.stack.len:
+      cairoRestore(ctx.cr)
     cairoDestroy(ctx.cr)
   if ctx.surface != nil:
     cairoSurfaceDestroy(ctx.surface)
-  `=destroy`(ctx.stack)
-  `=destroy`(ctx.error)
+
+when defined(gcDestructors):
+  proc `=destroy`(ctx: CairoContext) =
+    releaseHandles(ctx)
+    `=destroy`(ctx.stack)
+    `=destroy`(ctx.error)
+
+else:
+  # refc only accepts the older `var` signature, and its GC frees the seq
+  # and the string. Clearing the handles keeps a second call harmless.
+  proc `=destroy`(ctx: var CairoContext) =
+    releaseHandles(ctx)
+    ctx.cr = nil
+    ctx.surface = nil
 
 proc fail(ctx: var CairoContext, message: string) =
   if ctx.error.len == 0:
@@ -231,7 +256,9 @@ proc checkStatus(ctx: var CairoContext) =
 proc newCairoContext*(cr: pointer): CairoContext =
   ## Wraps a `cairo_t` from any other binding, keeping a reference to it.
   ## pollock's user space is the cairo_t's user space at this point; `toImage`
-  ## works when its target is an image surface.
+  ## works when its target is an image surface. Drawing calls leave the
+  ## cairo_t's matrix, source and line settings as they found them.
+  doAssert cr != nil, "newCairoContext needs a cairo_t, not nil"
   result = CairoContext(
     cr: cairoReference(cast[CairoHandle](cr)),
     state: CairoState(transform: affineIdentity),
@@ -271,12 +298,20 @@ func toCairo(m: Affine): CairoMatrix =
 func toAffine(m: CairoMatrix): Affine =
   affine(m.xx, m.yx, m.xy, m.yy, m.x0, m.y0)
 
+func isUsable(m: Affine): bool =
+  ## Finite and invertible. Cairo rejects any other matrix by putting the
+  ## cairo_t (or pattern) into a permanent error state.
+  for v in [m.a, m.b, m.c, m.d, m.e, m.f, m.determinant]:
+    if v.classify in {fcNan, fcInf, fcNegInf}:
+      return false
+  m.determinant != 0
+
 proc applyTransform(ctx: var CairoContext): bool =
   ## Sets the cairo_t's matrix to the base matrix times the current
-  ## transform. False when the result is singular, which draws nothing and
-  ## would put the cairo_t into a permanent error state.
+  ## transform. False when the result is singular or not finite, which draws
+  ## nothing and would put the cairo_t into a permanent error state.
   let m = ctx.base.toAffine * ctx.state.transform
-  if m.determinant == 0:
+  if not m.isUsable:
     return false
   var cm = m.toCairo
   cairoSetMatrix(ctx.cr, addr cm)
@@ -322,6 +357,23 @@ func toCairo(extend: Extend): cint =
   of exPad: cairoExtendPad
   of exRepeat: cairoExtendRepeat
   of exReflect: cairoExtendReflect
+
+func toCairo(cap: LineCap): cint =
+  case cap
+  of lcButt: cairoLineCapButt
+  of lcRound: cairoLineCapRound
+  of lcSquare: cairoLineCapSquare
+
+func toCairo(join: LineJoin): cint =
+  case join
+  of ljMiter: cairoLineJoinMiter
+  of ljRound: cairoLineJoinRound
+  of ljBevel: cairoLineJoinBevel
+
+func toCairo(interp: Interpolation): cint =
+  case interp
+  of ipNearest: cairoFilterNearest
+  of ipBilinear: cairoFilterBilinear
 
 proc setSolid(ctx: var CairoContext, color: Color) =
   let c = color.clamped
@@ -375,39 +427,21 @@ proc clear*(ctx: var CairoContext, color: Color) =
   cairoRestore(ctx.cr)
   ctx.checkStatus()
 
-proc fillPath*(ctx: var CairoContext, path: BezPath, paint: Paint, rule: FillRule) =
-  if path.isEmpty or not ctx.applyTransform():
-    return
-  ctx.buildPath(path)
-  ctx.setSource(paint)
-  cairoSetFillRule(ctx.cr, rule.toCairo)
-  cairoFill(ctx.cr)
+template drawing(ctx: var CairoContext, body: untyped) =
+  ## Runs a drawing call between `cairo_save` and `cairo_restore`, so the
+  ## matrix, source and line settings it sets don't outlive it, which leaves
+  ## a wrapped cairo_t's state as its owner set it. The body is skipped when
+  ## the transform can't be used.
+  cairoSave(ctx.cr)
+  if ctx.applyTransform():
+    body
+  cairoRestore(ctx.cr)
   ctx.checkStatus()
 
-proc strokePath*(
-    ctx: var CairoContext, path: BezPath, paint: Paint, style: StrokeStyle
-) =
-  if path.isEmpty or style.width <= 0 or not ctx.applyTransform():
-    return
-  ctx.buildPath(path)
-  ctx.setSource(paint)
+proc setStrokeStyle(ctx: var CairoContext, style: StrokeStyle) =
   cairoSetLineWidth(ctx.cr, style.width)
-  cairoSetLineCap(
-    ctx.cr,
-    case style.cap
-    of lcButt: cairoLineCapButt
-    of lcRound: cairoLineCapRound
-    of lcSquare: cairoLineCapSquare
-    ,
-  )
-  cairoSetLineJoin(
-    ctx.cr,
-    case style.join
-    of ljMiter: cairoLineJoinMiter
-    of ljRound: cairoLineJoinRound
-    of ljBevel: cairoLineJoinBevel
-    ,
-  )
+  cairoSetLineCap(ctx.cr, style.cap.toCairo)
+  cairoSetLineJoin(ctx.cr, style.join.toCairo)
   cairoSetMiterLimit(ctx.cr, style.miterLimit)
   if style.isDashed:
     # Cairo rejects negative lengths, so they are clamped like everywhere
@@ -419,10 +453,33 @@ proc strokePath*(
     cairoSetDash(ctx.cr, addr dashes[0], dashes.len.cint, style.dashOffset)
   else:
     cairoSetDash(ctx.cr, nil, 0, 0)
-  cairoStroke(ctx.cr)
-  ctx.checkStatus()
+
+proc fillPath*(ctx: var CairoContext, path: BezPath, paint: Paint, rule: FillRule) =
+  if path.isEmpty:
+    return
+  ctx.drawing:
+    ctx.buildPath(path)
+    ctx.setSource(paint)
+    cairoSetFillRule(ctx.cr, rule.toCairo)
+    cairoFill(ctx.cr)
+
+proc strokePath*(
+    ctx: var CairoContext, path: BezPath, paint: Paint, style: StrokeStyle
+) =
+  if path.isEmpty or style.width <= 0:
+    return
+  ctx.drawing:
+    ctx.buildPath(path)
+    ctx.setSource(paint)
+    ctx.setStrokeStyle(style)
+    cairoStroke(ctx.cr)
 
 proc clipPath*(ctx: var CairoContext, path: BezPath, rule: FillRule) =
+  # The clip has to outlive the call, so this one can't run inside a
+  # save/restore pair. The matrix and fill rule are put back by hand.
+  var matrix: CairoMatrix
+  cairoGetMatrix(ctx.cr, addr matrix)
+  let previousRule = cairoGetFillRule(ctx.cr)
   if not ctx.applyTransform():
     # A singular transform flattens the path to nothing, so nothing is
     # inside it: clip everything with an empty path.
@@ -431,6 +488,8 @@ proc clipPath*(ctx: var CairoContext, path: BezPath, rule: FillRule) =
     ctx.buildPath(path)
   cairoSetFillRule(ctx.cr, rule.toCairo)
   cairoClip(ctx.cr)
+  cairoSetFillRule(ctx.cr, previousRule)
+  cairoSetMatrix(ctx.cr, addr matrix)
   ctx.checkStatus()
 
 proc save*(ctx: var CairoContext) =
@@ -479,7 +538,15 @@ proc uploadImage(image: ImageData): CairoSurface =
 proc drawImage*(
     ctx: var CairoContext, image: ImageData, dst: Rect, interp: Interpolation
 ) =
-  if image.isEmpty or dst.isEmpty or not ctx.applyTransform():
+  if image.isEmpty or dst.isEmpty:
+    return
+  # The pattern matrix maps user space to image pixels. A tiny `dst` can
+  # overflow it, and Cairo would reject it the way it rejects a singular
+  # transform.
+  let m =
+    scale(image.width.float64 / dst.width, image.height.float64 / dst.height) *
+    translate(-dst.x0, -dst.y0)
+  if not m.isUsable:
     return
   let surface = uploadImage(image)
   let status = cairoSurfaceStatus(surface)
@@ -487,29 +554,21 @@ proc drawImage*(
     ctx.fail($cairoStatusToString(status))
     cairoSurfaceDestroy(surface)
     return
-  let pattern = cairoPatternCreateForSurface(surface)
-  # The pattern matrix maps user space to image pixels. Pad at the edges so
-  # bilinear sampling doesn't fade into transparency at the border.
-  var m = (
-    scale(image.width.float64 / dst.width, image.height.float64 / dst.height) *
-    translate(-dst.x0, -dst.y0)
-  ).toCairo
-  cairoPatternSetMatrix(pattern, addr m)
-  cairoPatternSetExtend(pattern, cairoExtendPad)
-  cairoPatternSetFilter(
-    pattern,
-    case interp
-    of ipNearest: cairoFilterNearest
-    of ipBilinear: cairoFilterBilinear
-    ,
-  )
-  cairoSetSource(ctx.cr, pattern)
-  cairoPatternDestroy(pattern)
+  ctx.drawing:
+    let pattern = cairoPatternCreateForSurface(surface)
+    var cm = m.toCairo
+    cairoPatternSetMatrix(pattern, addr cm)
+    # Pad at the edges so bilinear sampling doesn't fade into transparency
+    # at the border.
+    cairoPatternSetExtend(pattern, cairoExtendPad)
+    cairoPatternSetFilter(pattern, interp.toCairo)
+    cairoSetSource(ctx.cr, pattern)
+    cairoPatternDestroy(pattern)
+    cairoNewPath(ctx.cr)
+    cairoRectangle(ctx.cr, dst.x0, dst.y0, dst.width, dst.height)
+    cairoSetFillRule(ctx.cr, cairoFillRuleWinding)
+    cairoFill(ctx.cr)
   cairoSurfaceDestroy(surface)
-  cairoRectangle(ctx.cr, dst.x0, dst.y0, dst.width, dst.height)
-  cairoSetFillRule(ctx.cr, cairoFillRuleWinding)
-  cairoFill(ctx.cr)
-  ctx.checkStatus()
 
 proc finish*(ctx: var CairoContext): RenderResult =
   cairoSurfaceFlush(cairoGetTarget(ctx.cr))
@@ -522,28 +581,65 @@ proc finish*(ctx: var CairoContext): RenderResult =
 
 # Reading back
 
-proc pixel*(ctx: CairoContext, x, y: int): Color =
-  ## The straight-alpha color of one pixel. Only for image surfaces.
-  let target = cairoGetTarget(ctx.cr)
-  if cairoSurfaceGetType(target) != cairoSurfaceTypeImage:
-    return transparent
+type PixelView = object
+  ## The target's pixels, flushed and ready to read. `data` is nil when they
+  ## can't be read.
+  data: ptr UncheckedArray[uint8]
+  stride, width, height: int
+  opaque: bool ## RGB24, whose fourth byte is unused.
+
+proc pixelView(ctx: CairoContext): PixelView =
+  # The owned surface, not `cairo_get_target`: that returns an error surface
+  # with no pixels once the cairo_t has failed.
+  let target =
+    if ctx.surface != nil:
+      ctx.surface
+    else:
+      cairoGetTarget(ctx.cr)
+  if cairoSurfaceStatus(target) != cairoStatusSuccess or
+      cairoSurfaceGetType(target) != cairoSurfaceTypeImage:
+    return
+  let format = cairoImageSurfaceGetFormat(target)
+  if format != cairoFormatArgb32 and format != cairoFormatRgb24:
+    return
   cairoSurfaceFlush(target)
-  let data = cairoImageSurfaceGetData(target)
-  let i = y * cairoImageSurfaceGetStride(target).int + x * 4
+  PixelView(
+    data: cairoImageSurfaceGetData(target),
+    stride: cairoImageSurfaceGetStride(target).int,
+    width: cairoImageSurfaceGetWidth(target).int,
+    height: cairoImageSurfaceGetHeight(target).int,
+    opaque: format == cairoFormatRgb24,
+  )
+
+func at(v: PixelView, x, y: int): Color =
+  let i = y * v.stride + x * 4
   when cpuEndian == littleEndian:
-    let (b, g, r, a) = (data[i], data[i + 1], data[i + 2], data[i + 3])
+    var (b, g, r, a) = (v.data[i], v.data[i + 1], v.data[i + 2], v.data[i + 3])
   else:
-    let (a, r, g, b) = (data[i], data[i + 1], data[i + 2], data[i + 3])
+    var (a, r, g, b) = (v.data[i], v.data[i + 1], v.data[i + 2], v.data[i + 3])
+  if v.opaque:
+    a = 255
   rgba8(r, g, b, a).unpremultiplied
 
+proc pixel*(ctx: CairoContext, x, y: int): Color =
+  ## The straight-alpha color of one pixel. Transparent when `(x, y)` is
+  ## outside the target, or the target isn't an ARGB32 or RGB24 image
+  ## surface that can be read.
+  let v = ctx.pixelView
+  if v.data == nil or x < 0 or y < 0 or x >= v.width or y >= v.height:
+    return transparent
+  v.at(x, y)
+
 proc toImage*(ctx: CairoContext, format = ifRgba8): ImageData =
-  ## The rendered picture. Empty when the target isn't an image surface.
-  if cairoSurfaceGetType(cairoGetTarget(ctx.cr)) != cairoSurfaceTypeImage:
+  ## The rendered picture. Empty when the target isn't an ARGB32 or RGB24
+  ## image surface that can be read.
+  let v = ctx.pixelView
+  if v.data == nil:
     return
-  result = newImage(ctx.width, ctx.height, format)
-  for y in 0 ..< ctx.height:
-    for x in 0 ..< ctx.width:
-      result[x, y] = ctx.pixel(x, y)
+  result = newImage(v.width, v.height, format)
+  for y in 0 ..< v.height:
+    for x in 0 ..< v.width:
+      result[x, y] = v.at(x, y)
 
 static:
   doAssert CairoContext is RenderContext

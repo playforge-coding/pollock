@@ -64,7 +64,7 @@ If the native API has fast paths for simple shapes, check for them: `fillPath` r
 
 Brushes, textures and layouts that belong to a device (Direct2D, WebGL) must be created by the backend from the `Paint` and `ImageData` values it is given. Cache them keyed by the value if creating them is slow; a backend owns its cache and drops it in `finish` or when the device is lost.
 
-Own native handles with `=destroy` hooks so a context can be dropped without leaking, and disable `=copy` for types that hold a handle. `pollock/backends/cairo` in the repository is a worked example of a backend over a C library: hand-written bindings for just the calls it makes, flags from `pkg-config` at compile time, handles released in `=destroy`, and the transform kept in Nim so a singular one can be skipped before the library sees it.
+Own native handles with `=destroy` hooks so a context can be dropped without leaking, and disable `=copy` for types that hold a handle. If your users might build with `--mm:refc`, declare the hook under `when defined(gcDestructors)` with the `=destroy(x: T)` signature and give refc the older `=destroy(x: var T)` in the `else` branch: refc rejects the first form at compile time. `pollock/backends/cairo` in the repository is a worked example of a backend over a C library: hand-written bindings for just the calls it makes, flags from `pkg-config` at compile time, handles released in `=destroy`, and the transform kept in Nim so a singular or non-finite one can be skipped before the library sees it.
 
 ## Errors
 

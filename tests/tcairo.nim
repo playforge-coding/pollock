@@ -72,6 +72,20 @@ when defined(pollockCairo) and not defined(js):
       check ctx.finish().ok
       check ctx.pixel(5, 5) == blue
 
+    test "a non-finite transform draws nothing and does no harm":
+      var ctx = newCairoContext(10, 10)
+      ctx.withTransform(affine(NaN, 0, 0, 1, 0, 0)):
+        ctx.fill(rect(0, 0, 10, 10), red)
+        ctx.withClip(rect(0, 0, 10, 10)):
+          ctx.fill(rect(0, 0, 10, 10), red)
+      ctx.withTransform(scale(1e300)):
+        ctx.withTransform(scale(1e300)):
+          ctx.fill(rect(0, 0, 10, 10), red)
+      ctx.drawImage(newImage(2, 2), rect(0, 0, 1e-320, 1e-320), ipNearest)
+      ctx.fill(rect(0, 0, 10, 10), blue)
+      check ctx.finish().ok
+      check ctx.pixel(5, 5) == blue
+
     test "gradients interpolate straight alpha":
       var ctx = newCairoContext(100, 1)
       ctx.fill(
@@ -126,12 +140,39 @@ when defined(pollockCairo) and not defined(js):
       check owner.pixel(1, 1) == red
       check wrapped.toImage()[1, 1] == red
 
+    test "a wrapped cairo_t keeps its matrix and save stack":
+      var owner = newCairoContext(10, 10)
+      owner.translate(5, 5)
+      owner.fill(rect(0, 0, 1, 1), blue)
+      block:
+        # Drawing through `owner` must not leave its transform on the
+        # cairo_t, or this context would take it as its base.
+        var wrapped = newCairoContext(owner.cairoHandle)
+        wrapped.fill(rect(0, 0, 2, 2), red)
+        check owner.pixel(1, 1) == red
+        # Left unrestored: destroying the context pops it.
+        wrapped.save()
+        wrapped.clip(rect(0, 0, 1, 1))
+      owner.fill(rect(0, 0, 5, 5), green)
+      check owner.pixel(8, 8) == green
+
     test "a failure is reported from finish":
       var ctx = newCairoContext(-1, 5)
       ctx.fill(rect(0, 0, 1, 1), red)
       let res = ctx.finish()
       check not res.ok
       check res.message.len > 0
+      # Reading back a failed context gives nothing rather than crashing.
+      check ctx.pixel(0, 0) == transparent
+      check ctx.toImage().isEmpty
+
+    test "pixels outside the target are transparent":
+      var ctx = newCairoContext(4, 4)
+      ctx.clear(red)
+      check ctx.pixel(-1, 0) == transparent
+      check ctx.pixel(0, 4) == transparent
+      check ctx.pixel(4, 0) == transparent
+      check ctx.pixel(3, 3) == red
 
     test "samples match the CPU goldens within tolerance":
       # Antialiasing and dash phases differ between renderers, so a few edge
