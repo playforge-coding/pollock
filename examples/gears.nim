@@ -162,8 +162,9 @@ proc render*[C: RenderContext](s: Gears, ctx: var C) =
   var placed: seq[BezPath]
   for i, g in s.gears:
     placed.add (translate(g.center.toVec) * rotate(s.angleOf(i))).transform(g.shape)
-  for path in placed:
-    ctx.fill(translate(shadowOffset).transform(path), black.withAlpha(0.35), frEvenOdd)
+  ctx.withTransform(translate(shadowOffset)):
+    for path in placed:
+      ctx.fill(path, black.withAlpha(0.35), frEvenOdd)
 
   for i, g in s.gears:
     let r = g.radius + module
@@ -188,8 +189,11 @@ proc render*[C: RenderContext](s: Gears, ctx: var C) =
     )
     ctx.fill(circle(g.center, 2.5), rgb8(30, 28, 26))
     if i == s.hover or i == s.drag:
+      # A circle's path runs the way angles grow, so moving the dashes back
+      # by the arc this gear has turned through carries them along with it.
+      let ring = r + 6
       ctx.stroke(
-        circle(g.center, r + 6),
+        circle(g.center, ring),
         white.withAlpha(if i == s.drag: 0.6 else: 0.3),
-        strokeStyle(width = 2, dashes = [4.0, 4.0], dashOffset = s.angle * r),
+        strokeStyle(width = 2, dashes = [4.0, 4.0], dashOffset = -s.angleOf(i) * ring),
       )

@@ -89,7 +89,7 @@ func onOrbit(s: Orrery, radius, angle: float64): Point =
   ## A point on a circular orbit around the sun, squashed by the view's tilt.
   sun + vec2(cos(angle) * radius, sin(angle) * radius * s.tilt)
 
-proc drawPlanet[C: RenderContext](ctx: var C, s: Orrery, p: Planet, at: Point) =
+proc drawPlanet[C: RenderContext](ctx: var C, p: Planet, at: Point) =
   # The sun is off to one side of every planet. Light comes from there.
   let toSun = (sun - at).normalized
   let body = circle(at, p.size)
@@ -239,7 +239,7 @@ proc render*[C: RenderContext](s: Orrery, ctx: var C) =
         ctx.fill(circle(moonAt, 2.8), rgb8(190, 190, 200))
       if p.ring:
         ctx.drawRingHalf(s, p, b.at, front = false)
-      ctx.drawPlanet(s, p, b.at)
+      ctx.drawPlanet(p, b.at)
       if p.ring:
         ctx.drawRingHalf(s, p, b.at, front = true)
       if p.moon and moonInFront:

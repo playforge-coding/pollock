@@ -11,7 +11,7 @@ import ./scene
 type
   Spark = object
     pos, vel: Vec2
-    trail: array[4, Vec2] ## Earlier positions, newest first.
+    trail: array[3, Vec2] ## Earlier positions, newest first.
     life, maxLife, hue, width, drag: float64
     twinkle: bool
 
@@ -231,7 +231,7 @@ proc render*[C: RenderContext](s: Fireworks, ctx: var C) =
       alpha *= 0.25
     var path = newPath()
     path.moveTo p.pos.toPoint
-    for q in p.trail[0 .. 2]:
+    for q in p.trail:
       path.lineTo q.toPoint
     var style = trailStyle
     style.width = p.width * (0.5 + 0.5 * k)

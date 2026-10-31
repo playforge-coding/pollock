@@ -47,7 +47,7 @@ func curve(s: Beziers): BezPath =
   result.cubicTo s.pts[1], s.pts[2], s.pts[3]
 
 proc render*[C: RenderContext](s: Beziers, ctx: var C) =
-  ctx.clear(rgb8(248, 246, 240))
+  ctx.fill(sceneBounds, rgb8(248, 246, 240))
   var grid = newPath()
   for i in 0 .. int(sceneWidth / 20):
     grid.moveTo point(i.float64 * 20, 0)

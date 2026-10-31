@@ -7,12 +7,12 @@
 ## that fades it from tail to head, color from the direction of travel, and
 ## a dashed ring whose dashes turn with the stirring.
 
-import std/[math, random]
+import std/[deques, math, random]
 import ./scene
 
 type
   Agent = object
-    trail: seq[Point] ## Oldest first; the last point is the head.
+    trail: Deque[Point] ## Oldest first; the last point is the head.
     age, life: float64
 
   FlowField* = object
@@ -36,7 +36,8 @@ func fieldAngle(p: Point, t: float64): float64 =
     0.8 * sin((x + y) * 0.006 + t * 0.13) + 0.5 * cos((x - 2 * y) * 0.013 + t * 0.29)
 
 proc spawn(s: var FlowField): Agent =
-  result.trail = @[point(s.rng.rand(sceneWidth), s.rng.rand(sceneHeight))]
+  result.trail = initDeque[Point](trailLength + 1)
+  result.trail.addLast point(s.rng.rand(sceneWidth), s.rng.rand(sceneHeight))
   result.life = s.rng.rand(4.0 .. 9.0)
 
 func newFlowField*(): FlowField =
@@ -62,13 +63,14 @@ proc update*(s: var FlowField, dt: float64, input: Input) =
     if d > 1 and d < stirRadius * 1.6:
       # Swirl around the pointer, strongest close in, and with the button
       # down also fall toward it.
-      let falloff = exp(-(d / stirRadius) ^ 2)
+      # Unary minus binds tighter than `^`, hence the inner parentheses.
+      let falloff = exp(-((d / stirRadius) ^ 2))
       let around = toPointer.perp / d
       v =
         v + around * (170 * falloff * s.stir) + toPointer / d * (160 * falloff * s.pull)
-    a.trail.add head + v * dt
+    a.trail.addLast head + v * dt
     if a.trail.len > trailLength:
-      a.trail.delete 0
+      discard a.trail.popFirst()
     a.age += dt
     let p = a.trail[^1]
     let outside =
@@ -93,8 +95,12 @@ proc render*[C: RenderContext](s: FlowField, ctx: var C) =
     # Fade in at birth and out at the end of life.
     let alpha = min(1.0, min(a.age, a.life - a.age) * 1.5).max(0)
     let hue = 0.55 + 0.18 * sin(arctan2(dir.y, dir.x))
+    var path = newPath()
+    path.moveTo tail
+    for i in 1 ..< a.trail.len:
+      path.lineTo a.trail[i]
     ctx.stroke(
-      polygonPath(a.trail, closed = false),
+      path,
       linearGradient(
         tail, head, hsl(hue, 0.8, 0.6, 0), hsl(hue, 0.85, 0.65, 0.9 * alpha)
       ),

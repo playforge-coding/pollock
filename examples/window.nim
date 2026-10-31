@@ -43,9 +43,11 @@ type
     when defined(pollockCairo):
       cairo: CairoContext
       cairoSize: (int, int)
-    frames: int
-    frameTime: float64 ## Seconds spent drawing since the title last changed.
-    titleClock: MonoTime
+    frames: int ## Frames since the statistics were last measured.
+    frameTime: float64 ## Seconds spent drawing those frames.
+    statsClock: MonoTime ## When the statistics were last measured.
+    stats: string ## The last measured frame time and rate.
+    titleStale: bool ## The scene, backend or size changed since the title did.
 
 const
   letterbox = rgb8(24, 24, 28)
@@ -101,20 +103,26 @@ proc toScene(app: App, x, y: cfloat): Point =
   viewTransform(w.int, h.int).inverse * point(x.float64, y.float64)
 
 proc updateTitle(app: var App) =
-  let elapsed = (getMonoTime() - app.titleClock).inMicroseconds.float64 / 1e6
-  if elapsed < 0.5 and app.frames > 0:
+  ## Measures the frame time and rate twice a second, and rewrites the title
+  ## when they change or when a key changed what it describes.
+  let elapsed = (getMonoTime() - app.statsClock).inMicroseconds.float64 / 1e6
+  if elapsed >= 0.5:
+    let fps = round(app.frames.float64 / elapsed).int
+    let ms = 1000 * app.frameTime / max(app.frames, 1).float64
+    app.stats = &"{ms:.1f} ms a frame, {fps} fps"
+    app.frames = 0
+    app.frameTime = 0
+    app.statsClock = getMonoTime()
+    app.titleStale = true
+  if not app.titleStale:
     return
-  let fps = round(app.frames.float64 / max(elapsed, 1e-6)).int
-  let ms = 1000 * app.frameTime / max(app.frames, 1).float64
   let (w, h) = app.pixelSize
   let paused = if app.paused: " (paused)" else: ""
   let title =
     &"pollock: {app.scene.kind.title}{paused} | {app.scene.kind.hint} | " &
-    &"{app.backend} {w}x{h}, {ms:.1f} ms a frame, {fps} fps"
+    &"{app.backend} {w}x{h}, {app.stats}"
   discard setWindowTitle(app.window, cstring(title))
-  app.frames = 0
-  app.frameTime = 0
-  app.titleClock = getMonoTime()
+  app.titleStale = false
 
 proc present(app: var App, img: ImageData) =
   if app.textureSize != (img.width, img.height):
@@ -175,9 +183,11 @@ proc save(app: App) =
 
 proc switchTo(app: var App, kind: SceneKind) =
   app.scene = newScene(kind)
-  app.frames = 0
 
 proc handleKey(app: var App, key: Keycode) =
+  # Most keys change something the title shows: the scene, the pause, the
+  # backend or the size drawn at.
+  app.titleStale = true
   case key
   of SDLK_ESCAPE:
     app.quit = true
@@ -219,7 +229,10 @@ proc handleEvents(app: var App) =
       app.input.pos = app.toScene(event.motion.x, event.motion.y)
       app.input.inside = true
     of EVENT_MOUSE_BUTTON_DOWN:
+      # A click can arrive with no motion before it, such as the one that
+      # focuses the window.
       app.input.pos = app.toScene(event.button.x, event.button.y)
+      app.input.inside = true
       app.input.down = true
       app.input.pressed = true
     of EVENT_MOUSE_BUTTON_UP:
@@ -234,7 +247,12 @@ proc handleEvents(app: var App) =
     app.input.inside = false
 
 proc main() =
-  var app = App(scene: newScene(SceneKind.low), titleClock: getMonoTime())
+  var app = App(
+    scene: newScene(SceneKind.low),
+    statsClock: getMonoTime(),
+    stats: "measuring",
+    titleStale: true,
+  )
   if paramCount() >= 1:
     var found = false
     for kind in SceneKind:
