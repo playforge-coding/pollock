@@ -1,8 +1,8 @@
 ## The Cairo backend: draws through libcairo. Cairo is found through
 ## `pkg-config` at compile time, so it needs the development package
 ## (`libcairo2-dev` on Debian, `cairo` from Homebrew). It compiles under the
-## C and Objective-C targets, not JavaScript, and not in NimScript, whose VM
-## can't call C functions.
+## C, C++ and Objective-C targets, not JavaScript, and not in NimScript, whose
+## VM can't call C functions.
 ##
 ## A `CairoContext` either owns an offscreen ARGB32 image surface
 ## (`newCairoContext(width, height)`), which `toImage` reads back, or wraps a
@@ -29,7 +29,7 @@ import ../context
 export context
 
 when defined(js):
-  {.error: "the Cairo backend needs the C target".}
+  {.error: "the Cairo backend needs the C, C++ or Objective-C target".}
 elif defined(nimscript):
   {.
     error:
@@ -62,29 +62,46 @@ type
   CairoMatrix {.importc: "cairo_matrix_t", header: cairoHeader, bycopy.} = object
     xx, yx, xy, yy, x0, y0: cdouble
 
+  # Cairo's enums, each under its C name: the C++ target doesn't turn an int
+  # into an enum by itself, so a value needs the cast these types give it.
+  CairoStatus {.importc: "cairo_status_t", header: cairoHeader.} = distinct cint
+  CairoFormat {.importc: "cairo_format_t", header: cairoHeader.} = distinct cint
+  CairoSurfaceType {.importc: "cairo_surface_type_t", header: cairoHeader.} =
+    distinct cint
+  CairoOperator {.importc: "cairo_operator_t", header: cairoHeader.} = distinct cint
+  CairoFillRule {.importc: "cairo_fill_rule_t", header: cairoHeader.} = distinct cint
+  CairoLineCap {.importc: "cairo_line_cap_t", header: cairoHeader.} = distinct cint
+  CairoLineJoin {.importc: "cairo_line_join_t", header: cairoHeader.} = distinct cint
+  CairoExtend {.importc: "cairo_extend_t", header: cairoHeader.} = distinct cint
+  CairoFilter {.importc: "cairo_filter_t", header: cairoHeader.} = distinct cint
+
+proc `==`(a, b: CairoStatus): bool {.borrow.}
+proc `==`(a, b: CairoFormat): bool {.borrow.}
+proc `==`(a, b: CairoSurfaceType): bool {.borrow.}
+
 const
-  cairoStatusSuccess = 0.cint
-  cairoFormatArgb32 = 0.cint
-  cairoFormatRgb24 = 1.cint
-  cairoSurfaceTypeImage = 0.cint
-  cairoOperatorSource = 1.cint
-  cairoFillRuleWinding = 0.cint
-  cairoFillRuleEvenOdd = 1.cint
-  cairoLineCapButt = 0.cint
-  cairoLineCapRound = 1.cint
-  cairoLineCapSquare = 2.cint
-  cairoLineJoinMiter = 0.cint
-  cairoLineJoinRound = 1.cint
-  cairoLineJoinBevel = 2.cint
-  cairoExtendRepeat = 1.cint
-  cairoExtendReflect = 2.cint
-  cairoExtendPad = 3.cint
-  cairoFilterNearest = 3.cint
-  cairoFilterBilinear = 4.cint
+  cairoStatusSuccess = CairoStatus(0)
+  cairoFormatArgb32 = CairoFormat(0)
+  cairoFormatRgb24 = CairoFormat(1)
+  cairoSurfaceTypeImage = CairoSurfaceType(0)
+  cairoOperatorSource = CairoOperator(1)
+  cairoFillRuleWinding = CairoFillRule(0)
+  cairoFillRuleEvenOdd = CairoFillRule(1)
+  cairoLineCapButt = CairoLineCap(0)
+  cairoLineCapRound = CairoLineCap(1)
+  cairoLineCapSquare = CairoLineCap(2)
+  cairoLineJoinMiter = CairoLineJoin(0)
+  cairoLineJoinRound = CairoLineJoin(1)
+  cairoLineJoinBevel = CairoLineJoin(2)
+  cairoExtendRepeat = CairoExtend(1)
+  cairoExtendReflect = CairoExtend(2)
+  cairoExtendPad = CairoExtend(3)
+  cairoFilterNearest = CairoFilter(3)
+  cairoFilterBilinear = CairoFilter(4)
 
 {.push cdecl, header: cairoHeader.}
 proc cairoImageSurfaceCreate(
-  format: cint, width, height: cint
+  format: CairoFormat, width, height: cint
 ): CairoSurface {.importc: "cairo_image_surface_create".}
 
 proc cairoImageSurfaceGetData(
@@ -105,13 +122,16 @@ proc cairoImageSurfaceGetStride(
 
 proc cairoImageSurfaceGetFormat(
   surface: CairoSurface
-): cint {.importc: "cairo_image_surface_get_format".}
+): CairoFormat {.importc: "cairo_image_surface_get_format".}
 
 proc cairoSurfaceGetType(
   surface: CairoSurface
-): cint {.importc: "cairo_surface_get_type".}
+): CairoSurfaceType {.importc: "cairo_surface_get_type".}
 
-proc cairoSurfaceStatus(surface: CairoSurface): cint {.importc: "cairo_surface_status".}
+proc cairoSurfaceStatus(
+  surface: CairoSurface
+): CairoStatus {.importc: "cairo_surface_status".}
+
 proc cairoSurfaceFlush(surface: CairoSurface) {.importc: "cairo_surface_flush".}
 proc cairoSurfaceMarkDirty(
   surface: CairoSurface
@@ -122,8 +142,11 @@ proc cairoSurfaceDestroy(surface: CairoSurface) {.importc: "cairo_surface_destro
 proc cairoCreate(target: CairoSurface): CairoHandle {.importc: "cairo_create".}
 proc cairoReference(cr: CairoHandle): CairoHandle {.importc: "cairo_reference".}
 proc cairoDestroy(cr: CairoHandle) {.importc: "cairo_destroy".}
-proc cairoStatus(cr: CairoHandle): cint {.importc: "cairo_status".}
-proc cairoStatusToString(status: cint): cstring {.importc: "cairo_status_to_string".}
+proc cairoStatus(cr: CairoHandle): CairoStatus {.importc: "cairo_status".}
+proc cairoStatusToString(
+  status: CairoStatus
+): cstring {.importc: "cairo_status_to_string".}
+
 proc cairoGetTarget(cr: CairoHandle): CairoSurface {.importc: "cairo_get_target".}
 proc cairoSave(cr: CairoHandle) {.importc: "cairo_save".}
 proc cairoRestore(cr: CairoHandle) {.importc: "cairo_restore".}
@@ -148,8 +171,11 @@ proc cairoRectangle(
   cr: CairoHandle, x, y, width, height: cdouble
 ) {.importc: "cairo_rectangle".}
 
-proc cairoSetFillRule(cr: CairoHandle, rule: cint) {.importc: "cairo_set_fill_rule".}
-proc cairoGetFillRule(cr: CairoHandle): cint {.importc: "cairo_get_fill_rule".}
+proc cairoSetFillRule(
+  cr: CairoHandle, rule: CairoFillRule
+) {.importc: "cairo_set_fill_rule".}
+
+proc cairoGetFillRule(cr: CairoHandle): CairoFillRule {.importc: "cairo_get_fill_rule".}
 proc cairoFill(cr: CairoHandle) {.importc: "cairo_fill".}
 proc cairoClip(cr: CairoHandle) {.importc: "cairo_clip".}
 proc cairoResetClip(cr: CairoHandle) {.importc: "cairo_reset_clip".}
@@ -157,8 +183,14 @@ proc cairoSetLineWidth(
   cr: CairoHandle, width: cdouble
 ) {.importc: "cairo_set_line_width".}
 
-proc cairoSetLineCap(cr: CairoHandle, cap: cint) {.importc: "cairo_set_line_cap".}
-proc cairoSetLineJoin(cr: CairoHandle, join: cint) {.importc: "cairo_set_line_join".}
+proc cairoSetLineCap(
+  cr: CairoHandle, cap: CairoLineCap
+) {.importc: "cairo_set_line_cap".}
+
+proc cairoSetLineJoin(
+  cr: CairoHandle, join: CairoLineJoin
+) {.importc: "cairo_set_line_join".}
+
 proc cairoSetMiterLimit(
   cr: CairoHandle, limit: cdouble
 ) {.importc: "cairo_set_miter_limit".}
@@ -168,7 +200,10 @@ proc cairoSetDash(
 ) {.importc: "cairo_set_dash".}
 
 proc cairoStroke(cr: CairoHandle) {.importc: "cairo_stroke".}
-proc cairoSetOperator(cr: CairoHandle, op: cint) {.importc: "cairo_set_operator".}
+proc cairoSetOperator(
+  cr: CairoHandle, op: CairoOperator
+) {.importc: "cairo_set_operator".}
+
 proc cairoPaint(cr: CairoHandle) {.importc: "cairo_paint".}
 proc cairoSetSourceRgba(
   cr: CairoHandle, r, g, b, a: cdouble
@@ -195,11 +230,11 @@ proc cairoPatternAddColorStopRgba(
 ) {.importc: "cairo_pattern_add_color_stop_rgba".}
 
 proc cairoPatternSetExtend(
-  pattern: CairoPattern, extend: cint
+  pattern: CairoPattern, extend: CairoExtend
 ) {.importc: "cairo_pattern_set_extend".}
 
 proc cairoPatternSetFilter(
-  pattern: CairoPattern, filter: cint
+  pattern: CairoPattern, filter: CairoFilter
 ) {.importc: "cairo_pattern_set_filter".}
 
 proc cairoPatternSetMatrix(
@@ -354,30 +389,30 @@ proc buildPath(ctx: var CairoContext, path: BezPath) =
       cairoClosePath(ctx.cr)
       current = start
 
-func toCairo(rule: FillRule): cint =
+func toCairo(rule: FillRule): CairoFillRule =
   case rule
   of frNonZero: cairoFillRuleWinding
   of frEvenOdd: cairoFillRuleEvenOdd
 
-func toCairo(extend: Extend): cint =
+func toCairo(extend: Extend): CairoExtend =
   case extend
   of exPad: cairoExtendPad
   of exRepeat: cairoExtendRepeat
   of exReflect: cairoExtendReflect
 
-func toCairo(cap: LineCap): cint =
+func toCairo(cap: LineCap): CairoLineCap =
   case cap
   of lcButt: cairoLineCapButt
   of lcRound: cairoLineCapRound
   of lcSquare: cairoLineCapSquare
 
-func toCairo(join: LineJoin): cint =
+func toCairo(join: LineJoin): CairoLineJoin =
   case join
   of ljMiter: cairoLineJoinMiter
   of ljRound: cairoLineJoinRound
   of ljBevel: cairoLineJoinBevel
 
-func toCairo(interp: Interpolation): cint =
+func toCairo(interp: Interpolation): CairoFilter =
   case interp
   of ipNearest: cairoFilterNearest
   of ipBilinear: cairoFilterBilinear

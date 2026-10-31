@@ -66,6 +66,15 @@ Brushes, textures and layouts that belong to a device (Direct2D, WebGL) must be 
 
 Own native handles with `=destroy` hooks so a context can be dropped without leaking, and disable `=copy` for types that hold a handle. If your users might build with `--mm:refc`, declare the hook under `when defined(gcDestructors)` with the `=destroy(x: T)` signature and give refc the older `=destroy(x: var T)` in the `else` branch: refc rejects the first form at compile time. `pollock/backends/cairo` in the repository is a worked example of a backend over a C library: hand-written bindings for just the calls it makes, flags from `pkg-config` at compile time, handles released in `=destroy`, and the transform kept in Nim so a singular or non-finite one can be skipped before the library sees it.
 
+Nim has four targets: C, C++, Objective-C and JavaScript. A binding to a C library can usually serve both `nim c` and `nim cpp`, since C++ compiles C headers, but C++ is stricter about types: it won't pass a plain `int` where the C function takes an enum. Declare each enum as its own type under its C name, as the Cairo backend does, and the generated code casts the values for you:
+
+```nim
+type CairoFillRule {.importc: "cairo_fill_rule_t", header: "cairo.h".} = distinct cint
+const cairoFillRuleEvenOdd = CairoFillRule(1)
+```
+
+A library with a C++ API (classes, templates, namespaces) is bound with `importcpp` instead, and the backend then compiles only under `nim cpp`. Say so in your documentation and run your tests with `nim cpp`. The core of pollock compiles under C++ like everything else, so nothing else changes.
+
 ## Errors
 
 Drawing calls must not raise. Record the first failure in the context and report it from `finish`:

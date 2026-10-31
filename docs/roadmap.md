@@ -26,7 +26,7 @@ Finished items stay in their section with a check mark, so each section shows ho
 - [x] CPU backend: fills, strokes, clips, gradients, images, exact-area antialiasing.
 - [x] SVG backend: everything the CPU backend does, as a document.
 - [ ] Pure Nim text engine (`opentype`): OpenType parsing, shaping for Latin, Greek and Cyrillic, bidirectional text, line breaking.
-- [ ] HarfBuzz as a shaper for the pure Nim engine: the native library under C and Objective-C, harfbuzzjs (WebAssembly) under JavaScript, so that every script works on every target.
+- [ ] HarfBuzz as a shaper for the pure Nim engine: the native library under C, C++ and Objective-C, harfbuzzjs (WebAssembly) under JavaScript, so that every script works on every target.
 - [ ] Pure Nim text engine: complex scripts in the Nim shaper.
 - [ ] CPU backend: text, by filling glyph outlines.
 - [ ] SVG backend: text as glyph paths.
@@ -57,7 +57,7 @@ Separate packages, each a small crate with a C ABI and a cbindgen header, so pol
 ## Project
 
 - [x] Docs site on GitHub Pages.
-- [x] CI on Linux, macOS and Windows under the C and JavaScript targets.
+- [x] CI on Linux, macOS and Windows under the C, C++ and JavaScript targets.
 - [x] Interactive examples in a native window, through SDL3.
 - [ ] The same examples in a browser, compiled with `nim js` and drawn into a canvas.
 - [ ] A release on the Nimble package list.

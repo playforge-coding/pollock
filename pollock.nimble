@@ -25,11 +25,19 @@ task testjs, "Run the tests under the JavaScript target with Node":
     if name.startsWith("t") and name.endsWith(".nim"):
       exec "nim js -r -d:nodejs --hints:off --outdir:tests/jsout " & path
 
+task testcpp, "Run the tests under the C++ target":
+  for path in listFiles("tests"):
+    let name = path.extractFilename
+    if name.startsWith("t") and name.endsWith(".nim"):
+      exec "nim cpp -r --hints:off --outdir:tests/cppout " & path
+
 task testcairo, "Run the Cairo backend tests (needs cairo through pkg-config)":
-  # Under ORC and refc, since the destroy hook's signature differs between them.
-  for mm in ["orc", "refc"]:
-    exec "nim c -r --hints:off --mm:" & mm &
-      " -d:pollockCairo --outdir:tests/bin tests/tcairo.nim"
+  # Under ORC and refc, since the destroy hook's signature differs between
+  # them, and under C++, which needs the enum types the bindings declare.
+  for target in ["c", "cpp"]:
+    for mm in ["orc", "refc"]:
+      exec "nim " & target & " -r --hints:off --mm:" & mm &
+        " -d:pollockCairo --outdir:tests/bin tests/tcairo.nim"
 
 task samples, "Render the sample scenes with every backend that can run here into out/":
   # The Cairo backend joins in when pkg-config finds cairo.
