@@ -20,7 +20,7 @@ writePng(ctx.toImage(), "out.png")
 ```
 
 - One drawing API over any backend: a `RenderContext` is a Nim concept, so calls dispatch statically and a backend can live in any package.
-- Backends in the repository: a CPU rasterizer and an SVG writer, both pure Nim and running on the C, Objective-C and JavaScript targets, and a Cairo backend for the C and Objective-C targets. Core Graphics, Direct2D and WebGL2 are planned.
+- Backends in the repository: a CPU rasterizer and an SVG writer, both pure Nim and running on all of Nim's targets (C, C++, Objective-C and JavaScript), and a Cairo backend for the C, C++ and Objective-C targets. Core Graphics, Direct2D and WebGL2 are planned.
 - Geometry (points, rectangles, affine transforms, Bezier paths, flattening, stroke expansion), colors, gradients and PNG reading and writing, with no dependencies.
 
 ## Building
@@ -31,6 +31,7 @@ pollock pins Nim 2.4.0 with [mise](https://mise.jdx.dev).
 mise plugin install nim https://github.com/elijahr/vfox-nim
 mise install
 nimble test     # the test suite under the C target
+nimble testcpp  # the same under the C++ target
 nimble testjs   # the same under the JavaScript target, with Node
 nimble testcairo # the Cairo backend's tests, with Cairo's development package installed
 nimble samples  # renders the sample scenes into out/

@@ -1,8 +1,8 @@
 name: CI
 
 # Builds and tests on every platform the pure-Nim backends run on, under the
-# C target and the JavaScript target, tests the Cairo backend where Cairo
-# can be installed, and checks formatting.
+# C, C++ and JavaScript targets, tests the Cairo backend where Cairo can be
+# installed, and checks formatting.
 
 on:
   push:
@@ -47,6 +47,9 @@ jobs:
 
       - name: Test (C target)
         run: nimble -y test
+
+      - name: Test (C++ target)
+        run: nimble -y testcpp
 
       - name: Test (JavaScript target)
         run: nimble -y testjs

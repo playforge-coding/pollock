@@ -84,7 +84,7 @@ The window maps the scene into whatever size the window is with a transform: as 
 
 The CPU backend is the reference renderer, written to be exact rather than fast, so by default the window draws at its size in points and lets SDL scale the texture up on a high-density screen. At that size (960 by 600 for the default window) the scenes take 10 to 17 milliseconds a frame on the CPU backend on an Apple M-series laptop, so they keep up with a 60 Hz display or come close, and Cairo is faster still. Press H to draw every pixel.
 
-The same scenes run without a window in `tests/texamples.nim`, under the C and JavaScript targets: every scene draws on the CPU, SVG and recording backends, moves on its own, reacts to a scripted pointer, and starts the same way every time.
+The same scenes run without a window in `tests/texamples.nim`, under the C, C++ and JavaScript targets: every scene draws on the CPU, SVG and recording backends, moves on its own, reacts to a scripted pointer, and starts the same way every time.
 
 ## Writing a scene
 

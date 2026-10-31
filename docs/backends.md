@@ -7,14 +7,14 @@ A backend is a type that satisfies [`RenderContext`](context.md). pollock ships 
 | CPU | `pollock/backends/cpu` | any | done, no text |
 | SVG | `pollock/backends/svg` | any | done, no text |
 | Recording | `pollock/recording` | any | done |
-| Cairo | `pollock/backends/cairo` | C and Objective-C, where Cairo is installed | done, no text |
+| Cairo | `pollock/backends/cairo` | C, C++ and Objective-C, where Cairo is installed | done, no text |
 | Core Graphics | `pollock/backends/coregraphics` | macOS | planned |
 | Direct2D | `pollock/backends/direct2d` | Windows | planned |
 | WebGL2 | `pollock/backends/webgl2` | browsers | planned |
 
 ## CPU
 
-A software rasterizer that renders into a premultiplied RGBA float buffer. It runs on the C, Objective-C and JavaScript targets, and it is the reference renderer: the sample scenes are compared against its output pixel for pixel.
+A software rasterizer that renders into a premultiplied RGBA float buffer. It runs on every Nim target (C, C++, Objective-C and JavaScript), and it is the reference renderer: the sample scenes are compared against its output pixel for pixel.
 
 ```nim
 import pollock/backends/cpu
@@ -63,7 +63,7 @@ assert ctx.commands[0].paint == solid(red)
 
 ## Cairo
 
-Draws through [Cairo](https://www.cairographics.org). The module finds Cairo through `pkg-config` when it compiles, so the development package has to be installed: `libcairo2-dev` on Debian and Ubuntu, `cairo-devel` on Fedora, `cairo` from Homebrew. It compiles under the C and Objective-C targets, not JavaScript, and it can't run in a NimScript (`.nims`) file: NimScript runs in the compiler's VM, which can't call C functions, so importing the module there stops with an error that says so. Put the drawing code in a `.nim` file and run it with `nim c -r`.
+Draws through [Cairo](https://www.cairographics.org). The module finds Cairo through `pkg-config` when it compiles, so the development package has to be installed: `libcairo2-dev` on Debian and Ubuntu, `cairo-devel` on Fedora, `cairo` from Homebrew. It compiles under the C, C++ and Objective-C targets, not JavaScript, and it can't run in a NimScript (`.nims`) file: NimScript runs in the compiler's VM, which can't call C functions, so importing the module there stops with an error that says so. Put the drawing code in a `.nim` file and run it with `nim c -r`.
 
 The module exports the primitives, not the `fill`, `stroke` and `clip` helpers, so import `pollock` (or `pollock/draw`) next to it, as in the example below.
 
@@ -98,7 +98,7 @@ Not supported yet: text. Once the text API exists, Cairo will draw Pango's glyph
 The [roadmap](roadmap.md) has the order. The plan for each, so that the shape of the code is settled before it is written:
 
 - **Core Graphics**: Core Graphics and Core Text are C APIs, so the drawing works under both `nim c` and `nim objc`. The Objective-C parts (getting a `CGContextRef` from a view, `CALayer` and `NSImage` bridging) sit behind one small interface: `importobjc` under the Objective-C target, a `.m` shim compiled with `{.compile.}` under the C target.
-- **Direct2D**: COM calls through vtables from C, with DirectWrite for text and WIC for bitmaps.
+- **Direct2D**: COM calls through vtables, which work the same from C and C++, with DirectWrite for text and WIC for bitmaps.
 - **WebGL2**: shapes go through a shared GPU tessellation layer (flattened outlines to triangles, stencil-then-cover fills, batching), antialiasing through a multisampled renderbuffer, text from the pure Nim engine through a glyph atlas texture. The tessellation layer is meant to be reusable by a WebGPU backend.
 
 Text engines and backends will combine freely: any backend can draw the layout of any engine on the same platform, so Core Graphics can draw Parley's text and the CPU backend can draw Core Text's. The [text design](architecture.md#text-planned) has the full table.
