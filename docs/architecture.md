@@ -13,10 +13,12 @@ flowchart TD
   ctx -.implemented by.-> cpu[backends/cpu]
   ctx -.implemented by.-> svg[backends/svg]
   ctx -.implemented by.-> rec[recording]
+  ctx -.implemented by.-> cairo[backends/cairo]
   ctx -.implemented by.-> ext[third-party backends]
   cpu --> geo
   cpu --> png[pollock/png]
   svg --> png
+  cairo --> libcairo[libcairo]
 ```
 
 - The **value types** know nothing about backends: `geometry` (points, rectangles, shapes, affine transforms, Bezier paths, flattening), `color`, `paint`, `stroke` (styles and stroke expansion) and `image`.
@@ -53,15 +55,22 @@ A `Shader` is a paint resolved for one fill: solid color, linear or radial gradi
 
 Each primitive becomes one element with the current transform as a `matrix(...)` attribute, so there is no transform state to track in the output and the coordinates in the document are the user's own. Clips are the exception: they open a `<g clip-path>`, and the state keeps the ids of the open groups. `restore` closes the groups opened since the matching `save`, and `clear` closes all of them around its rectangle and reopens them after, since an SVG element can't escape a clip on an enclosing group any other way.
 
+## The Cairo backend
+
+`backends/cairo.nim` is the first native backend and the pattern for the others. Its bindings are hand-written and cover only what the backend calls: opaque `ptr` types for `cairo_t`, `cairo_surface_t` and `cairo_pattern_t`, `cairo_matrix_t` as a `bycopy` object, enum values as `cint` constants, and the procs with `importc` and `header: "cairo.h"`. The compiler flags come from `pkg-config --cflags cairo` and `pkg-config --libs cairo` at compile time through `gorgeEx`, and a missing Cairo is a compile error with the message from `pkg-config`. The context owns its handles with `=destroy` (`cairo_destroy`, `cairo_surface_destroy`) and has `=copy` disabled. The hook is declared twice under `when defined(gcDestructors)`: ORC and ARC take the Nim 2 signature `=destroy(x: T)`, and refc only accepts the older `=destroy(x: var T)`, so a program built with `--mm:refc` would otherwise fail to compile. `nimble testcairo` runs the tests under both.
+
+The transform is kept in Nim, as in the other backends, and set on the cairo_t before every drawing call (`applyTransform`), which is what lets a singular or non-finite transform be skipped instead of poisoning the cairo_t. Every drawing call except `clipPath` runs inside a `cairo_save`/`cairo_restore` pair, so the matrix, source and line settings it sets don't outlive it; `clipPath` puts the matrix and fill rule back by hand, since its clip has to stay. That also keeps `currentTransform` relative to the point where a wrapped cairo_t was taken over: the cairo_t's matrix at that moment is stored as the base, and the matrix set before drawing is `base * transform`. The clip is the one piece of state Cairo keeps for us, through `cairo_save` and `cairo_restore`. Patterns are created, set as the source and released per call; Cairo fixes a pattern's user space when it becomes the source, so `setSource` always runs after `applyTransform`.
+
 ## PNG
 
 `png.nim` is a complete, dependency-free PNG codec for 8-bit images. The encoder writes stored (uncompressed) deflate blocks, since speed and simplicity matter more than size for test output; the decoder has a full inflate so it can read PNGs from anywhere. Since `readPng` takes arbitrary files, malformed input raises `PngError` rather than a defect: the IHDR chunk's length and dimensions are checked, and inflation stops once the output passes the size the header implies, so a few megabytes of crafted data can't expand into gigabytes. It exists so the CPU backend can save its output and the SVG backend can embed images on every target, including JavaScript, where there is no zlib to link.
 
 ## Targets
 
-Everything in `src/` compiles under `nim c`, `nim objc` and `nim js`, and the tests run under C and JavaScript in CI. Rules that keep it that way:
+Everything in `src/` except the native backends compiles under `nim c`, `nim objc` and `nim js`, and the tests run under C and JavaScript in CI. Rules that keep it that way:
 
 - No `ptr`, `addr` or `cast` of memory in the core or the pure-Nim backends. Pixel buffers are `seq[uint8]` or `seq[float32]`.
+- A native backend compiles for the targets its [table row](backends.md) names and uses `ptr` for the library's handles. Its test file is a no-op without the backend's define (`-d:pollockCairo`), so `nimble test` and `nimble testjs` run on every machine, and a task (`nimble testcairo`) runs it with the define.
 - File I/O is wrapped in `when not defined(js)`.
 - The JavaScript backend evaluates a `case` selector once per branch. Bind a selector with side effects to a `let` first; `png.nim` does this for the deflate block type.
 - Unsigned integer arithmetic behaves the same on both targets, as do the `shl` and `shr` operators on `uint32`, so checksums and bit readers are fine to write plainly.

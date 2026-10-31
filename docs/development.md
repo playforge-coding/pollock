@@ -17,7 +17,8 @@ Nimble ships with Nim. The package manifest is `pollock.nimble` at the root; `co
 | --- | --- |
 | `nimble test` | Runs every `tests/t*.nim` under the C target. |
 | `nimble testjs` | Runs the same tests under the JavaScript target with Node. |
-| `nimble samples` | Renders the sample scenes with the CPU and SVG backends into `out/`. |
+| `nimble testcairo` | Runs the Cairo backend's tests, once under ORC and once under refc. Needs Cairo's development package, found through `pkg-config`. |
+| `nimble samples` | Renders the sample scenes with the CPU and SVG backends into `out/`, and with Cairo too (as `<name>-cairo.png`) when `pkg-config` finds it. |
 | `nimble goldens` | Rewrites the golden files in `tests/golden/` from the current output. |
 | `nph src tests tools` | Formats the code. Run it before committing. |
 | `nim check src/pollock/backends/cpu.nim` | Type-checks one file quickly. |
@@ -32,12 +33,13 @@ One `t*.nim` per area in `tests/`, using `std/unittest`:
 - `tsvg`: the SVG writer's output.
 - `tcpu`: the rasterizer, with exact pixel checks for aligned shapes, half-pixel coverage, compositing, fill rules, clips, transforms, strokes, geometry outside the target, gradients and images.
 - `tsamples`: renders every sample scene with the CPU and SVG backends and compares with the goldens.
+- `tcairo`: the Cairo backend, with pixel checks for the things Cairo does differently from the CPU backend (clear, clips, singular and non-finite transforms, degenerate gradients, dashes, image byte order, wrapping a `cairo_t` without disturbing its state, error reporting and reading back a failed context), and the sample scenes compared with the CPU goldens at a tolerance. The whole file is a no-op unless compiled with `-d:pollockCairo`, so `nimble test` and `nimble testjs` still run on machines without Cairo; `nimble testcairo` passes the define.
 
-Add a test with every behavior change. Tests that touch files skip themselves under JavaScript with `when not defined(js)`.
+Add a test with every behavior change. Tests that touch files skip themselves under JavaScript with `when not defined(js)`. A test for a native backend guards its whole body with that backend's define, as `tcairo` does.
 
 ## Golden files
 
-`tests/golden/cpu/*.png` and `tests/golden/svg/*.svg` are the expected output of the sample scenes. The CPU backend is deterministic, so its goldens must match exactly; the SVG goldens are compared as text. `.gitattributes` forces LF line endings, so a Windows checkout doesn't turn them into CRLF and break the comparison.
+`tests/golden/cpu/*.png` and `tests/golden/svg/*.svg` are the expected output of the sample scenes. The CPU backend is deterministic, so its goldens must match exactly; the SVG goldens are compared as text. Native backends have no goldens of their own: they are compared with the CPU goldens at a tolerance, since their antialiasing differs along edges and can change between library versions. `.gitattributes` forces LF line endings, so a Windows checkout doesn't turn them into CRLF and break the comparison.
 
 When a change alters rendering on purpose, run `nimble goldens`, look at the new images (open the PNGs, and the SVGs in a browser), and say in the commit message why they changed. Never regenerate goldens to make a failing test pass without looking.
 
@@ -58,6 +60,6 @@ Update the docs with the code. The Docs workflow runs the strict build on pull r
 
 ## Continuous integration
 
-- **CI** (`ci.yml`): runs `nimble test`, `nimble testjs` and `nimble samples` on Linux, macOS and Windows, uploads the rendered samples as artifacts, and checks formatting with `nph --check`.
+- **CI** (`ci.yml`): runs `nimble test`, `nimble testjs` and `nimble samples` on Linux, macOS and Windows, installs Cairo and runs `nimble testcairo` on Linux and macOS, uploads the rendered samples as artifacts, and checks formatting with `nph --check`.
 - **Docs** (`docs.yml`): builds the docs strictly when they change.
 - **Pages** (`pages.yml`): deploys the docs to GitHub Pages from `main`.

@@ -5,7 +5,7 @@ An abstract 2D graphics API for Nim, in the spirit of [piet](https://github.com/
 **Documentation: [playforge-coding.github.io/pollock](https://playforge-coding.github.io/pollock/)**
 
 > [!WARNING]
-> pollock is young. The API and the two pure-Nim backends (CPU and SVG) work; the native backends are still to come. See the [roadmap](https://playforge-coding.github.io/pollock/roadmap/).
+> pollock is young. The API, the two pure-Nim backends (CPU and SVG) and the Cairo backend work; the other native backends and text are still to come. See the [roadmap](https://playforge-coding.github.io/pollock/roadmap/).
 
 ```nim
 import pollock
@@ -20,7 +20,7 @@ writePng(ctx.toImage(), "out.png")
 ```
 
 - One drawing API over any backend: a `RenderContext` is a Nim concept, so calls dispatch statically and a backend can live in any package.
-- Backends in the repository: a CPU rasterizer and an SVG writer, both pure Nim and running on the C, Objective-C and JavaScript targets. Cairo, Core Graphics, Direct2D and WebGL2 are planned.
+- Backends in the repository: a CPU rasterizer and an SVG writer, both pure Nim and running on the C, Objective-C and JavaScript targets, and a Cairo backend for the C and Objective-C targets. Core Graphics, Direct2D and WebGL2 are planned.
 - Geometry (points, rectangles, affine transforms, Bezier paths, flattening, stroke expansion), colors, gradients and PNG reading and writing, with no dependencies.
 
 ## Building
@@ -32,6 +32,7 @@ mise plugin install nim https://github.com/elijahr/vfox-nim
 mise install
 nimble test     # the test suite under the C target
 nimble testjs   # the same under the JavaScript target, with Node
+nimble testcairo # the Cairo backend's tests, with Cairo's development package installed
 nimble samples  # renders the sample scenes into out/
 ```
 

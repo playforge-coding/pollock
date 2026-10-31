@@ -2,7 +2,7 @@
 
 ## Installing
 
-pollock needs Nim 2.4.0 or later and nothing else: the backends it ships with are pure Nim. The repository pins Nim through [mise](https://mise.jdx.dev):
+pollock needs Nim 2.4.0 or later and nothing else for the CPU and SVG backends, which are pure Nim. The Cairo backend needs Cairo's development package (see [Backends](backends.md#cairo)). The repository pins Nim through [mise](https://mise.jdx.dev):
 
 ```sh
 mise plugin install nim https://github.com/elijahr/vfox-nim
@@ -64,6 +64,22 @@ writeFile("first.svg", ctx.toSvg())
 ```
 
 Everything between them is unchanged, because the drawing calls are generic over the backend.
+
+## The same drawing through Cairo
+
+With Cairo's development package installed, the Cairo backend renders the same calls through libcairo:
+
+```nim
+import pollock
+import pollock/backends/cairo
+
+var ctx = newCairoContext(320, 200)
+# ... the same drawing calls ...
+doAssert ctx.finish().ok
+writePng(ctx.toImage(), "first-cairo.png")
+```
+
+`newCairoContext` also accepts a pointer to a `cairo_t` you already have, so the same code can draw into a GTK widget.
 
 ## Writing code that works with any backend
 

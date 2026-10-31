@@ -1,7 +1,8 @@
 name: CI
 
 # Builds and tests on every platform the pure-Nim backends run on, under the
-# C target and the JavaScript target, and checks formatting.
+# C target and the JavaScript target, tests the Cairo backend where Cairo
+# can be installed, and checks formatting.
 
 on:
   push:
@@ -36,11 +37,24 @@ jobs:
         with:
           node-version: "24"
 
+      - name: Install Cairo (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcairo2-dev
+
+      - name: Install Cairo (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cairo
+
       - name: Test (C target)
         run: nimble -y test
 
       - name: Test (JavaScript target)
         run: nimble -y testjs
+
+      # The Cairo backend links libcairo, which the Windows runner lacks.
+      - name: Test the Cairo backend
+        if: runner.os != 'Windows'
+        run: nimble -y testcairo
 
       - name: Render the samples
         run: nimble -y samples

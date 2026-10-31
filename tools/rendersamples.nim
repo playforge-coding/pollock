@@ -1,9 +1,13 @@
 ## Renders every sample scene with the CPU and SVG backends into a directory:
-## `nim r tools/rendersamples.nim out`.
+## `nim r tools/rendersamples.nim out`. With `-d:pollockCairo` the Cairo
+## backend renders them too, as `<name>-cairo.png`.
 
 import std/[os, strformat]
 import pollock/[samples, png]
 import pollock/backends/[cpu, svg]
+
+when defined(pollockCairo):
+  import pollock/backends/cairo
 
 proc main() =
   let dir =
@@ -22,6 +26,14 @@ proc main() =
     s.drawSample(i)
     doAssert s.finish().ok
     writeFile(dir / &"{name}.svg", s.toSvg())
-    echo &"{name}: {dir}/{name}.png, {dir}/{name}.svg"
+    var files = &"{dir}/{name}.png, {dir}/{name}.svg"
+
+    when defined(pollockCairo):
+      var k = newCairoContext(sampleWidth, sampleHeight)
+      k.drawSample(i)
+      doAssert k.finish().ok
+      writePng(k.toImage(), dir / &"{name}-cairo.png")
+      files.add &", {dir}/{name}-cairo.png"
+    echo &"{name}: {files}"
 
 main()

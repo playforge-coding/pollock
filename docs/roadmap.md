@@ -27,12 +27,14 @@ Finished items stay in their section with a check mark, so each section shows ho
 
 ## Native backends
 
-- [ ] Cairo, with Pango for text.
+- [x] Cairo: paths, strokes, clips, gradients and images, offscreen or wrapping a `cairo_t`.
+- [ ] Cairo: text through Pango.
 - [ ] Core Graphics under both the Objective-C and the C target.
 - [ ] Direct2D with DirectWrite.
 - [ ] A shared GPU tessellation layer (`pollock/gpu`).
 - [ ] WebGL2 on the JavaScript target.
-- [ ] Platform-specific CI: Linux for Cairo, macOS for Core Graphics, Windows for Direct2D, headless Chromium for WebGL2.
+- [x] CI for the Cairo backend on Linux and macOS.
+- [ ] Platform-specific CI for the rest: macOS for Core Graphics, Windows for Direct2D, headless Chromium for WebGL2.
 
 ## Project
 
