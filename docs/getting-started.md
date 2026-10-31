@@ -105,3 +105,7 @@ nim r -d:pollockBackend=pollock/backends/svg first.nim
 ```
 
 The value is a module path, so a backend from another package works too (`-d:pollockBackend=pollock_webgpu`). You can always import a backend module directly instead, as the SVG example above does.
+
+## Next
+
+[Examples](examples.md) has five animated scenes (an orrery, fireworks, a Bezier curve editor, meshing gears and a flow field) that run in a native window and react to the mouse, with the code in `examples/`.

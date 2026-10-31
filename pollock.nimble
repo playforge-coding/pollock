@@ -10,6 +10,11 @@ srcDir = "src"
 
 requires "nim >= 2.4.0"
 
+# Only the examples' native window uses SDL3, so it's a development
+# dependency: installing pollock as a library doesn't pull it in.
+dev:
+  requires "sdl3 >= 1.1"
+
 # Tasks
 
 import std/[os, strutils]
@@ -34,6 +39,19 @@ task samples, "Render the sample scenes with every backend that can run here int
     else:
       ""
   exec "nim r -d:release --hints:off" & cairo & " tools/rendersamples.nim out"
+
+task window, "Open the example scenes in a native window (needs SDL3)":
+  # `config.nims` reads the paths to the locked dependencies (the sdl3
+  # binding) from nimble.paths, which `nimble setup` writes.
+  if not fileExists("nimble.paths"):
+    exec "nimble -y setup"
+  # With Cairo found too, B in the window switches between the backends.
+  let cairo =
+    if gorgeEx("pkg-config --exists cairo").exitCode == 0:
+      " -d:pollockCairo"
+    else:
+      ""
+  exec "nim r -d:release --hints:off" & cairo & " examples/window.nim"
 
 task goldens, "Rewrite the golden files in tests/golden from the current output":
   exec "nim r --hints:off -d:pollockUpdateGoldens tests/tsamples.nim"
