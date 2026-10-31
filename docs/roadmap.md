@@ -40,4 +40,6 @@ Finished items stay in their section with a check mark, so each section shows ho
 
 - [x] Docs site on GitHub Pages.
 - [x] CI on Linux, macOS and Windows under the C and JavaScript targets.
+- [x] Interactive examples in a native window, through SDL3.
+- [ ] The same examples in a browser, compiled with `nim js` and drawn into a canvas.
 - [ ] A release on the Nimble package list.

@@ -13,6 +13,7 @@ nav = [
   { "The context" = "context.md" },
   { "Backends" = "backends.md" },
   { "Writing a backend" = "writing-a-backend.md" },
+  { "Examples" = "examples.md" },
   { "Architecture" = "architecture.md" },
   { "Development" = "development.md" },
   { "Roadmap" = "roadmap.md" },

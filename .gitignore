@@ -8,3 +8,5 @@
 /site/
 /tools/rendersamples
 /.playwright-mcp/
+nimble.develop
+nimble.paths

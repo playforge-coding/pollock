@@ -34,9 +34,10 @@ nimble test     # the test suite under the C target
 nimble testjs   # the same under the JavaScript target, with Node
 nimble testcairo # the Cairo backend's tests, with Cairo's development package installed
 nimble samples  # renders the sample scenes into out/
+nimble window   # the interactive examples in a native window, with SDL3 installed
 ```
 
-[Getting started](https://playforge-coding.github.io/pollock/getting-started/) walks through a first drawing.
+[Getting started](https://playforge-coding.github.io/pollock/getting-started/) walks through a first drawing, and [Examples](https://playforge-coding.github.io/pollock/examples/) covers the animated, interactive scenes in `examples/`.
 
 ## License
 

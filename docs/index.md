@@ -22,7 +22,8 @@ writePng(ctx.toImage(), "out.png")
 - **Static dispatch.** A backend is any type that satisfies the `RenderContext` concept, so drawing code is generic and calls go straight to the backend with nothing in between. A backend can live in any package; see [Writing a backend](writing-a-backend.md).
 - **Three backends today**: a CPU rasterizer with exact-area antialiasing and an SVG writer, both pure Nim and compiling for the C, Objective-C and JavaScript targets, and a Cairo backend for the C and Objective-C targets. Core Graphics, Direct2D and WebGL2 are on the [roadmap](roadmap.md).
 - **Geometry without dependencies.** Points, rectangles, rounded rectangles, circles, ellipses, affine transforms and Bezier paths, with flattening and stroke expansion, plus colors, gradients and PNG reading and writing.
+- **[Examples](examples.md)** that animate and react to the mouse in a native window: an orrery, fireworks, a Bezier curve editor, meshing gears and a flow field.
 
 ## Status
 
-pollock is young. The shape, paint, clip, transform and image parts of the API are in place and tested on the two pure-Nim backends. There is no text yet, and no native backend. The [roadmap](roadmap.md) says what comes next.
+pollock is young. The shape, paint, clip, transform and image parts of the API are in place and tested on the two pure-Nim backends and on Cairo. There is no text yet, and the other native backends are still to come. The [roadmap](roadmap.md) says what comes next.

@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "packages": {
+    "nim": {
+      "version": "2.4.0",
+      "vcsRevision": "9f7a33f40ed5976a13e9ba56b556c7c3e4d19e9a",
+      "url": "https://github.com/nim-lang/Nim.git",
+      "downloadMethod": "git",
+      "dependencies": [],
+      "checksums": {
+        "sha1": "e4e638a20c4650cc6b463f8b19f5009db3a916b5"
+      }
+    },
+    "sdl3": {
+      "version": "1.1",
+      "vcsRevision": "533d22196dab2ea637ea0131171ed3f8db61fe90",
+      "url": "https://github.com/nim-lang/sdl3",
+      "downloadMethod": "git",
+      "dependencies": [
+        "nim"
+      ],
+      "checksums": {
+        "sha1": "fba327ac89367dcbcbaea1407da255607d43f04a"
+      }
+    }
+  },
+  "tasks": {}
+}

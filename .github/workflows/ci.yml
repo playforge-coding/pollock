@@ -51,6 +51,13 @@ jobs:
       - name: Test (JavaScript target)
         run: nimble -y testjs
 
+      # Compiles the examples' window without running it. The sdl3 package
+      # loads SDL3 at run time, so the runners don't need SDL3 installed.
+      - name: Build the example window
+        run: |
+          nimble -y setup
+          nim c --hints:off --outdir:nimcache/examples examples/window.nim
+
       # The Cairo backend links libcairo, which the Windows runner lacks.
       - name: Test the Cairo backend
         if: runner.os != 'Windows'
@@ -80,4 +87,4 @@ jobs:
           mise install
 
       - name: Check formatting
-        run: mise exec -- nph --check src tests tools
+        run: mise exec -- nph --check src tests tools examples
