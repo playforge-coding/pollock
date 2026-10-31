@@ -63,9 +63,12 @@ assert ctx.commands[0].paint == solid(red)
 
 ## Cairo
 
-Draws through [Cairo](https://www.cairographics.org). The module finds Cairo through `pkg-config` when it compiles, so the development package has to be installed: `libcairo2-dev` on Debian and Ubuntu, `cairo-devel` on Fedora, `cairo` from Homebrew. It compiles under the C and Objective-C targets, not JavaScript.
+Draws through [Cairo](https://www.cairographics.org). The module finds Cairo through `pkg-config` when it compiles, so the development package has to be installed: `libcairo2-dev` on Debian and Ubuntu, `cairo-devel` on Fedora, `cairo` from Homebrew. It compiles under the C and Objective-C targets, not JavaScript, and it can't run in a NimScript (`.nims`) file: NimScript runs in the compiler's VM, which can't call C functions, so importing the module there stops with an error that says so. Put the drawing code in a `.nim` file and run it with `nim c -r`.
+
+The module exports the primitives, not the `fill`, `stroke` and `clip` helpers, so import `pollock` (or `pollock/draw`) next to it, as in the example below.
 
 ```nim
+import pollock
 import pollock/backends/cairo
 
 var ctx = newCairoContext(width, height)   # an offscreen ARGB32 image surface, transparent black

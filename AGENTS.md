@@ -11,7 +11,7 @@ Backends:
 | `cpu` | `pollock/backends/cpu` | `c`, `objc`, `js` | done, no text. The reference renderer. |
 | `svg` | `pollock/backends/svg` | `c`, `objc`, `js` | done, no text |
 | `recording` | `pollock/recording` | any | done; records the calls, for tests |
-| `cairo` | `pollock/backends/cairo` | `c`, `objc` | done, no text (Pango is the plan). Needs Cairo through `pkg-config`. |
+| `cairo` | `pollock/backends/cairo` | `c`, `objc` | done, no text (Pango is the plan). Needs Cairo through `pkg-config`. Not NimScript: the VM can't call C, so importing it there is a compile error. |
 | `coregraphics` | `pollock/backends/coregraphics` | `objc`, and `c` through a wrapper | planned: Core Graphics, Core Text |
 | `direct2d` | `pollock/backends/direct2d` | `c` | planned: Direct2D, DirectWrite, WIC |
 | `webgl2` | `pollock/backends/webgl2` | `js` | planned: WebGL2, Canvas 2D for text |

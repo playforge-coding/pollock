@@ -1,7 +1,8 @@
 ## The Cairo backend: draws through libcairo. Cairo is found through
 ## `pkg-config` at compile time, so it needs the development package
 ## (`libcairo2-dev` on Debian, `cairo` from Homebrew). It compiles under the
-## C and Objective-C targets, not JavaScript.
+## C and Objective-C targets, not JavaScript, and not in NimScript, whose VM
+## can't call C functions.
 ##
 ## A `CairoContext` either owns an offscreen ARGB32 image surface
 ## (`newCairoContext(width, height)`), which `toImage` reads back, or wraps a
@@ -29,6 +30,12 @@ export context
 
 when defined(js):
   {.error: "the Cairo backend needs the C target".}
+elif defined(nimscript):
+  {.
+    error:
+      "the Cairo backend calls libcairo, which NimScript can't do; compile a .nim " &
+      "file with `nim c -r` instead, or use the CPU backend in a script"
+  .}
 
 const cairoCflags = gorgeEx("pkg-config --cflags cairo")
 const cairoLibs = gorgeEx("pkg-config --libs cairo")
