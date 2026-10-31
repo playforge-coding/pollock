@@ -1,0 +1,10 @@
+/tests/*
+!/tests/*.nim
+!/tests/config.nims
+!/tests/golden/
+/nimbledeps/
+/nimcache/
+/out/
+/site/
+/tools/rendersamples
+/.playwright-mcp/

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <defs>
+    <linearGradient id="g1" gradientUnits="userSpaceOnUse" x1="20" y1="0" x2="380" y2="0" spreadMethod="pad"><stop offset="0" stop-color="#f0503c"/><stop offset="0.5" stop-color="#fadc5a"/><stop offset="1" stop-color="#46a0f0"/></linearGradient>
+    <radialGradient id="g2" gradientUnits="userSpaceOnUse" cx="70" cy="180" r="70" spreadMethod="pad"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#285ac8"/></radialGradient>
+    <linearGradient id="g3" gradientUnits="userSpaceOnUse" x1="190" y1="0" x2="230" y2="0" spreadMethod="repeat"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#141414"/></linearGradient>
+    <linearGradient id="g4" gradientUnits="userSpaceOnUse" x1="190" y1="0" x2="230" y2="0" spreadMethod="reflect"><stop offset="0" stop-color="#ff7800"/><stop offset="1" stop-color="#0078ff"/></linearGradient>
+    <linearGradient id="g5" gradientUnits="userSpaceOnUse" x1="0" y1="120" x2="0" y2="140" spreadMethod="pad"><stop offset="0" stop-color="#ffffff" stop-opacity="0"/><stop offset="1" stop-color="#ffffff"/></linearGradient>
+  </defs>
+  <rect width="400" height="300" fill="#1e1e24"/>
+  <path d="M20 20 L380 20 L380 90 L20 90 Z" fill="url(#g1)"/>
+  <path d="M160 200 C160 238.66 128.66 270 90 270 C51.34 270 20 238.66 20 200 C20 161.34 51.34 130 90 130 C128.66 130 160 161.34 160 200 Z" fill="url(#g2)"/>
+  <path d="M190 130 L380 130 L380 200 L190 200 Z" fill="url(#g3)"/>
+  <path d="M190 215 L380 215 L380 285 L190 285 Z" fill="url(#g4)"/>
+  <path d="M30 120 L140 120 C145.523 120 150 124.477 150 130 L150 130 C150 135.523 145.523 140 140 140 L30 140 C24.477 140 20 135.523 20 130 L20 130 C20 124.477 24.477 120 30 120 Z" fill="url(#g5)"/>
+</svg>

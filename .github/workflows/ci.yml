@@ -1,0 +1,69 @@
+name: CI
+
+# Builds and tests on every platform the pure-Nim backends run on, under the
+# C target and the JavaScript target, and checks formatting.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jiro4989/setup-nim-action@v2.3.1
+        with:
+          nim-version: "2.4.0"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Test (C target)
+        run: nimble -y test
+
+      - name: Test (JavaScript target)
+        run: nimble -y testjs
+
+      - name: Render the samples
+        run: nimble -y samples
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: samples-${{ matrix.os }}
+          path: out/
+
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: jdx/mise-action@v5.2.4
+        with:
+          install: false
+
+      - name: Install the toolchain
+        run: |
+          mise plugin install nim https://github.com/elijahr/vfox-nim
+          mise install
+
+      - name: Check formatting
+        run: mise exec -- nph --check src tests tools
