@@ -113,6 +113,28 @@ suite "paths":
     check polys.len == 2
     check not polys[0].closed
 
+  test "a lone moveTo is left out, a zero-length segment is kept":
+    var p = newPath()
+    p.moveTo 5, 10
+    p.lineTo 15, 10
+    p.moveTo 30, 10
+    check p.flatten(0.1).len == 1
+    var dot = newPath()
+    dot.moveTo 30, 10
+    dot.lineTo 30, 10
+    check dot.flatten(0.1).len == 1
+    var closedDot = newPath()
+    closedDot.moveTo 30, 10
+    closedDot.closePath()
+    check closedDot.flatten(0.1).len == 1
+
+  test "maxScale is the largest stretch":
+    check maxScale(scale(20, 0.05)) ~= 20.0
+    check maxScale(scale(-3, 2)) ~= 3.0
+    check maxScale(rotate(0.7) * scale(5, 1)) ~= 5.0
+    check maxScale(skew(1, 0)) ~= (1 + sqrt(5.0)) / 2
+    check maxScale(scale(0)) == 0
+
   test "signed area orientation":
     let cw = [point(0, 0), point(10, 0), point(10, 10), point(0, 10)]
     let ccw = [point(0, 0), point(0, 10), point(10, 10), point(10, 0)]

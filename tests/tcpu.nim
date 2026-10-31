@@ -222,3 +222,92 @@ suite "cpu backend":
         total += ctx.pixel(x, y).a
     # Ring between radius 25 and 35.
     check abs(total - PI * (35 * 35 - 25 * 25)) < 15
+
+  test "a dashed stroke with zero gaps is solid":
+    var ctx = newCpuContext(30, 20)
+    ctx.stroke(line(0, 10, 20, 10), black, strokeStyle(width = 4, dashes = [5.0, 0.0]))
+    for x in 0 ..< 20:
+      check ctx.pixel(x, 10).a == 1.0
+    check ctx.pixel(20, 10).a == 0.0
+
+  test "a dotted stroke has a dot at the start":
+    var ctx = newCpuContext(30, 20)
+    ctx.stroke(
+      line(4, 10, 24, 10),
+      black,
+      strokeStyle(width = 4, cap = lcRound, dashes = [0.0, 5.0]),
+    )
+    for x in [4, 9, 14, 19, 23]:
+      check ctx.pixel(x, 10).a > 0.9
+    check ctx.pixel(6, 10).a == 0.0
+
+  test "a lone moveTo draws no dot":
+    var p = newPath()
+    p.moveTo 5, 10
+    p.lineTo 15, 10
+    p.moveTo 30, 10
+    var ctx = newCpuContext(40, 20)
+    ctx.stroke(p, black, strokeStyle(width = 6, cap = lcRound))
+    check ctx.pixel(10, 10).a == 1.0
+    check ctx.pixel(30, 10).a == 0.0
+
+  test "degenerate gradients paint the last stop":
+    var ctx = newCpuContext(4, 4)
+    ctx.fill(rect(0, 0, 4, 4), linearGradient(point(2, 2), point(2, 2), red, blue))
+    check ctx.pixel(1, 1) == blue
+    ctx.fill(rect(0, 0, 4, 4), radialGradient(point(2, 2), 0, red, green, exRepeat))
+    check ctx.pixel(1, 1) == green
+
+  test "strokes stay smooth under a stretching transform":
+    # The same stroke, once through the context's transform and once
+    # expanded and flattened finely by hand, must agree along the stretched
+    # axis too. A tolerance taken from the average scale instead of the
+    # largest one leaves about 80 pixels off by more than 24 levels here;
+    # the remaining differences come from where the stroke pieces overlap.
+    let style = strokeStyle(width = 2)
+    let m = translate(200, 20) * scale(20, 1)
+    var a = newCpuContext(400, 40)
+    a.withTransform(m):
+      a.stroke(circle(0, 0, 9), black, style)
+    var b = newCpuContext(400, 40)
+    b.fillPath(
+      m.transform(strokeOutline(circle(0, 0, 9).toPath, style, 0.0005)),
+      solid(black),
+      frNonZero,
+    )
+    let diff = compareImages(a.toImage(), b.toImage(), tolerance = 24)
+    checkpoint($diff.differingPixels & " pixels differ")
+    check diff.differingPixels < 30
+
+  test "fills in separate columns don't disturb each other":
+    var ctx = newCpuContext(100, 10)
+    ctx.clear(white)
+    ctx.fill(rect(2.5, 0, 6, 10), black)
+    ctx.fill(rect(60, 0, 70.5, 10), red)
+    check near(ctx.pixel(2, 5), gray(0.5))
+    check ctx.pixel(4, 5) == black
+    check ctx.pixel(6, 5) == white
+    check ctx.pixel(30, 5) == white
+    check ctx.pixel(60, 5) == red
+    check near(ctx.pixel(70, 5), rgb(1, 0.5, 0.5))
+    check ctx.pixel(71, 5) == white
+    ctx.fill(rect(95, 0, 120, 10), blue)
+    check ctx.pixel(99, 5) == blue
+    check ctx.pixel(94, 5) == white
+
+suite "sample helpers":
+  test "starPath uses its inner radius and any point count":
+    let thin = starPath(point(0, 0), 10, 3)
+    let fat = starPath(point(0, 0), 10, 8)
+    check abs(thin.area) < abs(fat.area)
+    let six = starPath(point(0, 0), 10, 5, points = 6)
+    check six.flatten(0.1)[0].points.len == 12
+    for i, p in six.flatten(0.1)[0].points:
+      check distance(p, point(0, 0)) ~= (if i mod 2 == 0: 10.0 else: 5.0)
+
+  test "pentagram has a hole under even-odd":
+    var ctx = newCpuContext(40, 40)
+    ctx.fill(pentagramPath(point(20, 20), 18), black, frEvenOdd)
+    check ctx.pixel(20, 20).a == 0.0
+    ctx.fill(pentagramPath(point(20, 20), 18), black, frNonZero)
+    check ctx.pixel(20, 20).a == 1.0

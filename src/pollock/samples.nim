@@ -21,12 +21,27 @@ func checkerboard*(cells, cellSize: int, a, b: Color): ImageData =
       let on = ((x div cellSize) + (y div cellSize)) mod 2 == 0
       result[x, y] = if on: a else: b
 
+func pentagramPath*(center: Point, radius: float64): BezPath =
+  ## A five-pointed star drawn as one self-intersecting polygon through every
+  ## second corner of a pentagon. The middle winds twice, so it fills
+  ## differently under the two fill rules.
+  for i in 0 ..< 5:
+    let angle = -PI / 2 + i.float64 * 4 * PI / 5
+    let p = center + vec2(cos(angle), sin(angle)) * radius
+    if i == 0:
+      result.moveTo p
+    else:
+      result.lineTo p
+  result.closePath()
+
 func starPath*(center: Point, outer, inner: float64, points = 5): BezPath =
-  ## A star drawn as one self-intersecting polygon, which fills differently
-  ## under the two fill rules.
-  for i in 0 ..< points:
-    let angle = -PI / 2 + i.float64 * 2 * PI / points.float64 * 2
-    let p = center + vec2(cos(angle), sin(angle)) * outer
+  ## A simple (not self-intersecting) star with `points` tips at radius
+  ## `outer` and the notches between them at radius `inner`. Needs at least
+  ## two points.
+  for i in 0 ..< 2 * points:
+    let angle = -PI / 2 + i.float64 * PI / points.float64
+    let r = if i mod 2 == 0: outer else: inner
+    let p = center + vec2(cos(angle), sin(angle)) * r
     if i == 0:
       result.moveTo p
     else:
@@ -139,8 +154,8 @@ proc sampleClipping[C: RenderContext](ctx: var C) =
 
 proc sampleFillRules[C: RenderContext](ctx: var C) =
   ctx.clear(white)
-  ctx.fill(starPath(point(100, 110), 85, 35), rgb8(220, 100, 40), frNonZero)
-  ctx.fill(starPath(point(300, 110), 85, 35), rgb8(40, 100, 220), frEvenOdd)
+  ctx.fill(pentagramPath(point(100, 110), 85), rgb8(220, 100, 40), frNonZero)
+  ctx.fill(pentagramPath(point(300, 110), 85), rgb8(40, 100, 220), frEvenOdd)
   var rings = newPath()
   for r in [70.0, 55.0, 40.0, 25.0, 10.0]:
     rings.extend circle(point(100, 230), r).toPath

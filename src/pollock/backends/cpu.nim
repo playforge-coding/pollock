@@ -72,23 +72,28 @@ func makeShader(paint: Paint, transform: Affine): Shader =
     result.kind = skSolid
     result.color = paint.color.clamped.premultiplied
   of pkLinearGradient:
-    result.kind = skLinear
-    result.stops = paint.linearStops
-    result.extend = paint.linearExtend
-    result.start = paint.start
     let d = paint.stop - paint.start
     let len2 = d.lengthSquared
-    result.direction =
-      if len2 > 0:
-        d / len2
-      else:
-        vec2(0, 0)
+    if len2 <= 0:
+      # No direction: paint the last stop, as SVG specifies.
+      result.kind = skSolid
+      result.color = colorAt(paint.linearStops, 1.0).clamped.premultiplied
+    else:
+      result.kind = skLinear
+      result.stops = paint.linearStops
+      result.extend = paint.linearExtend
+      result.start = paint.start
+      result.direction = d / len2
   of pkRadialGradient:
-    result.kind = skRadial
-    result.stops = paint.radialStops
-    result.extend = paint.radialExtend
-    result.center = paint.center
-    result.radius = paint.radius
+    if paint.radius <= 0:
+      result.kind = skSolid
+      result.color = colorAt(paint.radialStops, 1.0).clamped.premultiplied
+    else:
+      result.kind = skRadial
+      result.stops = paint.radialStops
+      result.extend = paint.radialExtend
+      result.center = paint.center
+      result.radius = paint.radius
 
 func imageShader(
     image: ImageData, dst: Rect, interp: Interpolation, transform: Affine
@@ -111,12 +116,7 @@ func sample(sh: Shader, x, y: float64): Color =
     colorAt(sh.stops, t).clamped.premultiplied
   of skRadial:
     let u = sh.inverse * point(x, y)
-    let dist = distance(u, sh.center)
-    let t =
-      if sh.radius > 0:
-        applyExtend(dist / sh.radius, sh.extend)
-      else:
-        1.0
+    let t = applyExtend(distance(u, sh.center) / sh.radius, sh.extend)
     colorAt(sh.stops, t).clamped.premultiplied
   of skImage:
     let u = sh.inverse * point(x, y)
@@ -243,9 +243,17 @@ template forCoverage(
     if not bounds.isEmpty:
       let rowStart = max(0, int(floor(bounds.y0)))
       let rowEnd = min(ctx.height, int(ceil(bounds.y1)))
+      # Edges only write cells from `floor(x0)` to `ceil(x1) + 1`. Left of
+      # that the running sum is zero, and right of the last pixel the shape
+      # touches it is back to zero, since every polyline is closed. So only
+      # those columns are cleared and scanned.
+      let colStart = int(floor(bounds.x0))
+      let accEnd = min(ctx.width + 2, int(ceil(bounds.x1)) + 2)
+      let colEnd = min(ctx.width, int(ceil(bounds.x1)) + 1)
       let stride = ctx.width + 2
-      for i in rowStart * stride ..< rowEnd * stride:
-        ctx.acc[i] = 0
+      for y in rowStart ..< rowEnd:
+        for i in y * stride + colStart ..< y * stride + accEnd:
+          ctx.acc[i] = 0
       for poly in polylines:
         let n = poly.points.len
         for i in 0 ..< n:
@@ -254,7 +262,7 @@ template forCoverage(
       for y in rowStart ..< rowEnd:
         var sum = 0.0'f32
         let lineStart = y * stride
-        for x in 0 ..< ctx.width:
+        for x in colStart ..< colEnd:
           sum += ctx.acc[lineStart + x]
           var cov = coverage(sum, rule)
           if clip != nil:
@@ -308,8 +316,9 @@ proc strokePath*(ctx: var CpuContext, path: BezPath, paint: Paint, style: Stroke
     return
   # The stroke is expanded in user space so a non-uniform transform
   # stretches it like the native renderers do. The flattening tolerance is
-  # converted to user units first.
-  let scale = max(ctx.state.transform.scaleFactor, 1e-6)
+  # converted to user units by the largest stretch, so it holds along the
+  # most stretched axis too.
+  let scale = max(ctx.state.transform.maxScale, 1e-12)
   let outline = strokeOutline(path, style, ctx.tolerance / scale)
   ctx.fillPolylines(
     ctx.devicePolylines(outline), frNonZero, makeShader(paint, ctx.state.transform)

@@ -44,8 +44,8 @@ You do not have to write a path flattener or a stroker:
 - `path.flatten(tolerance)` turns a `BezPath` into polylines.
 - `strokeOutline(path, style, tolerance)` turns a stroke into a fillable outline (fill it with `frNonZero`). Use it when the native API has no stroking, or when its stroking does not match the [rules](context.md#the-rules).
 - `dash(polylines, style)` applies a dash pattern on its own.
-- `transform(affine, path)` and `affine.scaleFactor` convert between user and device space; the CPU backend divides its device-space tolerance by `scaleFactor` to get a user-space one.
-- `colorAt(stops, t)` and `applyExtend(t, extend)` evaluate gradients.
+- `transform(affine, path)` and `affine.maxScale` convert between user and device space; the CPU backend divides its device-space tolerance by `maxScale` (the largest stretch in any direction) to get a user-space one that holds along every axis.
+- `colorAt(stops, t)` and `applyExtend(t, extend)` evaluate gradients. A linear gradient with no length, or a radial one with no radius, paints its last stop everywhere, as SVG specifies.
 - `ImageData.convert(format)` converts pixel formats, and `pollock/png` reads and writes PNG.
 
 If the native API has fast paths for simple shapes, check for them: `fillPath` receives a `BezPath`, and `path.elements` makes an axis-aligned rectangle easy to recognize (a move, three lines and a close).

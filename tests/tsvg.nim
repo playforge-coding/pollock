@@ -22,7 +22,34 @@ suite "svg backend":
   test "numbers are short":
     var ctx = newSvgContext(10, 10)
     ctx.fill(rect(0.5, 1.25, 2.0001, 3.14159), black)
-    check "M0.5 1.25 L2 1.25 L2 3.142" in ctx.toSvg
+    check "M0.5 1.25 L2.0001 1.25 L2.0001 3.14159" in ctx.toSvg
+    var round = newSvgContext(10, 10)
+    round.fill(rect(0, 0, 1.0 / 3, 1234.56789), black)
+    check "L0.3333333 0 L0.3333333 1234.568" in round.toSvg
+
+  test "small transform coefficients keep their precision":
+    var ctx = newSvgContext(40, 40)
+    ctx.scale(0.0004)
+    ctx.fill(rect(0, 0, 100000, 100000), black)
+    check "transform=\"matrix(0.0004 0 0 0.0004 0 0)\"" in ctx.toSvg
+    var rot = newSvgContext(10, 10)
+    rot.rotate(0.1)
+    rot.fill(rect(0, 0, 1, 1), black)
+    check "matrix(0.9950042 0.09983342 -0.09983342 0.9950042 0 0)" in rot.toSvg
+
+  test "a miter limit below 1 bevels":
+    var ctx = newSvgContext(10, 10)
+    ctx.stroke(line(0, 0, 10, 10), black, strokeStyle(miterLimit = 0.5))
+    ctx.stroke(line(0, 0, 10, 10), black, strokeStyle(miterLimit = 10))
+    let doc = ctx.toSvg
+    check "stroke-miterlimit=\"0.5\"" notin doc
+    check "stroke-linejoin=\"bevel\"" in doc
+    check "stroke-miterlimit=\"10\"" in doc
+
+  test "a negative radial radius is written as zero":
+    var ctx = newSvgContext(10, 10)
+    ctx.fill(rect(0, 0, 10, 10), radialGradient(point(5, 5), -3, red, blue))
+    check " r=\"0\"" in ctx.toSvg
 
   test "alpha and fill rule":
     var ctx = newSvgContext(10, 10)

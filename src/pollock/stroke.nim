@@ -76,53 +76,59 @@ func dash*(
   if pts.len < 2:
     return
 
-  # Find where the pattern starts after the offset.
+  # Find where the pattern starts after the offset. An offset that lands
+  # exactly on the end of an entry moves past it, but with no offset the
+  # pattern starts at its first entry even when that has zero length, so a
+  # dotted line gets its first dot.
   var index = 0
   var remaining = offset mod total
   if remaining < 0:
     remaining += total
-  while remaining >= pat[index]:
+  while remaining > 0 and remaining >= pat[index]:
     remaining -= pat[index]
     index = (index + 1) mod pat.len
-  var left = pat[index] - remaining # length left in the current dash entry
+  var left = pat[index] - remaining # length left in the current entry
   var on = index mod 2 == 0
 
   var current: Polyline
   if on:
     current.points.add pts[0]
-  for i in 1 ..< pts.len:
-    var a = pts[i - 1]
-    let b = pts[i]
-    var segLen = distance(a, b)
-    while segLen > 0 and left <= segLen:
-      let p = lerp(a, b, left / segLen)
+
+  # Called whenever the current entry runs out at `p`. Loops so that
+  # zero-length entries are handled: a zero-length "on" entry becomes a
+  # two-point dash at `p`, which strokes as a dot.
+  template boundary(p: Point) =
+    while left <= 0:
       if on:
         current.points.add p
         result.add current
         current = Polyline()
       else:
-        current.points.add p
+        current = Polyline(points: @[p])
       on = not on
-      segLen -= left
-      a = p
       index = (index + 1) mod pat.len
       left = pat[index]
-      if left == 0:
-        # Zero-length entry: a dot for an "on" entry, nothing for "off".
-        if on:
-          current.points.add p
-          result.add current
-          current = Polyline()
-        on = not on
-        index = (index + 1) mod pat.len
-        left = pat[index]
-    if on:
-      current.points.add b
+
+  boundary(pts[0])
+  for i in 1 ..< pts.len:
+    var a = pts[i - 1]
+    let b = pts[i]
+    var segLen = distance(a, b)
+    while left < segLen:
+      let p = lerp(a, b, left / segLen)
+      segLen -= left
+      a = p
+      left = 0
+      boundary(p)
     left -= segLen
-  # A dash that starts exactly where the path ends has no length; drop it.
-  if on and current.points.len > 1 and not (current.points[0] ~= current.points[^1]):
-    result.add current
-  elif on and current.points.len > 2:
+    # When the entry ends exactly at `b`, the next boundary adds `b`.
+    if on and left > 0:
+      current.points.add b
+  # Entries that end exactly at the end of the path: finish the last dash and
+  # emit any zero-length dots there. A dash that would start at the very end
+  # has no length and is dropped.
+  boundary(pts[^1])
+  if on and current.points.len > 1:
     result.add current
 
 func dash*(polylines: openArray[Polyline], style: StrokeStyle): seq[Polyline] =

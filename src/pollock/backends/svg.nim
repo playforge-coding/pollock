@@ -30,12 +30,16 @@ proc newSvgContext*(width, height: float64): SvgContext =
   SvgContext(width: width, height: height, state: SvgState(transform: affineIdentity))
 
 func fmt(x: float64): string =
-  ## Short decimal: integers without a point, otherwise up to three places.
-  if abs(x) < 0.0005:
+  ## Short decimal: integers without a point, otherwise about seven
+  ## significant digits and never fewer than three places. Small values keep
+  ## their precision, which matters for transform coefficients: a scale of
+  ## 0.0004 must not round to 0.
+  if abs(x) < 1e-12:
     return "0"
   if x == round(x) and abs(x) < 1e15:
     return $int(x)
-  result = formatFloat(x, ffDecimal, 3)
+  let decimals = min(15, max(3, 6 - int(floor(log10(abs(x))))))
+  result = formatFloat(x, ffDecimal, decimals)
   result = result.strip(leading = false, chars = {'0'})
   result = result.strip(leading = false, chars = {'.'})
 
@@ -106,9 +110,9 @@ proc paintAttrs(ctx: var SvgContext, paint: Paint, attr: string): string =
     let id = ctx.newId("g")
     ctx.defs.add "<radialGradient id=\"" & id &
       "\" gradientUnits=\"userSpaceOnUse\" cx=\"" & fmt(paint.center.x) & "\" cy=\"" &
-      fmt(paint.center.y) & "\" r=\"" & fmt(paint.radius) & "\" spreadMethod=\"" &
-      spreadMethod(paint.radialExtend) & "\">" & stopsMarkup(paint.radialStops) &
-      "</radialGradient>"
+      fmt(paint.center.y) & "\" r=\"" & fmt(max(0.0, paint.radius)) &
+      "\" spreadMethod=\"" & spreadMethod(paint.radialExtend) & "\">" &
+      stopsMarkup(paint.radialStops) & "</radialGradient>"
     result = " " & attr & "=\"url(#" & id & ")\""
 
 proc clear*(ctx: var SvgContext, color: Color) =
@@ -144,8 +148,13 @@ proc strokePath*(ctx: var SvgContext, path: BezPath, paint: Paint, style: Stroke
     el.add " stroke-linejoin=\"round\""
   of ljBevel:
     el.add " stroke-linejoin=\"bevel\""
-  if style.join == ljMiter and style.miterLimit != 4.0:
-    el.add " stroke-miterlimit=\"" & fmt(style.miterLimit) & "\""
+  if style.join == ljMiter:
+    # SVG ignores a miter limit below 1, but every miter is at least 1 long,
+    # so such a limit bevels every join.
+    if style.miterLimit < 1.0:
+      el.add " stroke-linejoin=\"bevel\""
+    elif style.miterLimit != 4.0:
+      el.add " stroke-miterlimit=\"" & fmt(style.miterLimit) & "\""
   if style.isDashed:
     var dashes: seq[string]
     for d in style.dashes:

@@ -28,6 +28,8 @@ p.cubicTo point(80, 120), point(30, 120), point(10, 90)
 p.closePath()
 ```
 
+A subpath that is only a `moveTo` draws nothing. One whose segment has zero length (`moveTo p` then `lineTo p`) draws a dot when stroked with round or square caps, as in SVG.
+
 `extend` appends one path to another, which is how you make a path with several subpaths (rings, holes). `transform(affine, path)` returns a transformed copy, `boundingBox` the box around the control points, `flatten(path, tolerance)` the polylines within `tolerance` of the curves, and `area` the signed area.
 
 Rectangles have the usual helpers: `width`, `height`, `size`, `origin`, `center`, `union`, `intersect`, `contains`, `inflate`, `inset`, `translate`, `normalized`, `roundOut`, `isEmpty`.
@@ -42,7 +44,7 @@ A `Paint` is what a fill or stroke is painted with:
 - `linearGradient(p0, p1, c0, c1)` or `linearGradient(p0, p1, stops)`: from `p0` to `p1` in user space (that is, under the current transform).
 - `radialGradient(center, radius, c0, c1)` or `radialGradient(center, radius, stops)`.
 
-Stops are `stop(offset, color)` with offsets in 0..1, in order. The optional `extend` argument (`exPad`, `exRepeat`, `exReflect`) says what happens outside 0..1.
+Stops are `stop(offset, color)` with offsets in 0..1, in order. The optional `extend` argument (`exPad`, `exRepeat`, `exReflect`) says what happens outside 0..1. A linear gradient whose two points are the same, or a radial one with no radius, paints the color of its last stop.
 
 ## Filling and stroking
 
@@ -65,6 +67,8 @@ Strokes the outline. The short forms stroke with butt caps and miter joins. A `S
 ```nim
 strokeStyle(width = 3, cap = lcRound, join = ljRound, dashes = [6.0, 3.0])
 ```
+
+A zero-length on entry draws a dot when the cap is round or square, so `dashes = [0.0, 6.0]` with `cap = lcRound` gives a dotted line that starts with a dot. A miter limit below 1 bevels every join.
 
 Stroke width is in user space: scale the context by two and a 1-wide stroke becomes 2 pixels wide.
 
@@ -89,7 +93,7 @@ proc rotateAbout(ctx, radians, center)
 
 Each one multiplies the current transform. `ctx.transform(affine)` applies any `Affine`, and `ctx.currentTransform` reads it back. Positive rotation turns clockwise on the screen, because y points down.
 
-`Affine` values compose with `*`, where `a * b` applies `b` first: `translate(100, 0) * rotate(0.5)` rotates, then moves. `inverse`, `apply` (also spelled `m * point`), `determinant` and `scaleFactor` are there for your own math.
+`Affine` values compose with `*`, where `a * b` applies `b` first: `translate(100, 0) * rotate(0.5)` rotates, then moves. `inverse`, `apply` (also spelled `m * point`), `determinant`, `scaleFactor` (the average stretch) and `maxScale` (the largest stretch in any direction) are there for your own math.
 
 ## Scopes
 

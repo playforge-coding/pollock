@@ -35,6 +35,47 @@ suite "dashing":
     check dash(poly, [], 0) == @[poly]
     check dash(poly, [0.0, 0.0], 0) == @[poly]
 
+  proc totalLength(pieces: seq[Polyline]): float64 =
+    for piece in pieces:
+      for i in 1 ..< piece.points.len:
+        result += distance(piece.points[i - 1], piece.points[i])
+
+  test "a zero-length gap keeps the line whole":
+    let poly = Polyline(points: @[point(0, 0), point(20, 0)])
+    let pieces = dash(poly, [5.0, 0.0], 0)
+    check pieces.len == 4
+    for piece in pieces:
+      check piece.points.len == 2
+    check abs(totalLength(pieces) - 20) < 1e-9
+
+  test "dots start at the beginning of the path":
+    let poly = Polyline(points: @[point(0, 0), point(20, 0)])
+    let pieces = dash(poly, [0.0, 5.0], 0)
+    var dots: seq[float64]
+    for piece in pieces:
+      check piece.points.len == 2
+      check piece.points[0] == piece.points[1]
+      dots.add piece.points[0].x
+    check dots == @[0.0, 5.0, 10.0, 15.0, 20.0]
+
+  test "an offset on an entry boundary starts in the next entry":
+    let poly = Polyline(points: @[point(0, 0), point(40, 0)])
+    let pieces = dash(poly, [10.0, 10.0], 10)
+    check pieces.len == 2
+    check pieces[0].points[0] == point(10, 0)
+
+  test "a dash ending on a vertex has no repeated point":
+    let poly = Polyline(points: @[point(0, 0), point(10, 0), point(10, 10)])
+    let pieces = dash(poly, [10.0, 5.0], 0)
+    check pieces[0].points == @[point(0, 0), point(10, 0)]
+    check pieces[1].points == @[point(10, 5), point(10, 10)]
+
+  test "a closed polyline is dashed around its closing edge":
+    let poly = Polyline(
+      points: @[point(0, 0), point(10, 0), point(10, 10), point(0, 10)], closed: true
+    )
+    check abs(totalLength(dash(poly, [5.0, 5.0], 0)) - 20) < 1e-9
+
 suite "outline":
   test "butt caps":
     let outline = strokeOutline(line(0, 0, 100, 0).toPath, strokeStyle(width = 10))

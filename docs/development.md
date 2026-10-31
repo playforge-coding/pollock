@@ -37,7 +37,7 @@ Add a test with every behavior change. Tests that touch files skip themselves un
 
 ## Golden files
 
-`tests/golden/cpu/*.png` and `tests/golden/svg/*.svg` are the expected output of the sample scenes. The CPU backend is deterministic, so its goldens must match exactly; the SVG goldens are compared as text.
+`tests/golden/cpu/*.png` and `tests/golden/svg/*.svg` are the expected output of the sample scenes. The CPU backend is deterministic, so its goldens must match exactly; the SVG goldens are compared as text. `.gitattributes` forces LF line endings, so a Windows checkout doesn't turn them into CRLF and break the comparison.
 
 When a change alters rendering on purpose, run `nimble goldens`, look at the new images (open the PNGs, and the SVGs in a browser), and say in the commit message why they changed. Never regenerate goldens to make a failing test pass without looking.
 

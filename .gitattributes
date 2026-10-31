@@ -1,0 +1,4 @@
+# The SVG goldens are compared byte for byte with what the SVG backend
+# writes, which always uses LF, so checkouts must not convert them to CRLF.
+* text=auto eol=lf
+*.png binary

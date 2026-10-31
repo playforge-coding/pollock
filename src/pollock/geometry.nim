@@ -340,9 +340,17 @@ func isTranslation*(m: Affine): bool =
   m.a == 1 and m.b == 0 and m.c == 0 and m.d == 1
 
 func scaleFactor*(m: Affine): float64 =
-  ## The geometric mean of the scaling along both axes, used to convert
-  ## tolerances between user and device space.
+  ## The geometric mean of the scaling along both axes (the square root of
+  ## the area scale).
   sqrt(abs(m.determinant))
+
+func maxScale*(m: Affine): float64 =
+  ## The most the transform stretches any direction: the largest singular
+  ## value of the linear part. Divide a device-space tolerance by this to get
+  ## a user-space tolerance that holds in every direction.
+  let s = m.a * m.a + m.b * m.b + m.c * m.c + m.d * m.d
+  let det = m.determinant
+  sqrt(max(0.0, (s + sqrt(max(0.0, s * s - 4 * det * det))) * 0.5))
 
 func rotateAbout*(radians: float64, center: Point): Affine =
   translate(center.toVec) * rotate(radians) * translate(-center.toVec)
@@ -589,7 +597,9 @@ func cubicPoint(p0, p1, p2, p3: Point, t: float64): Point =
 func flatten*(path: BezPath, tolerance: float64): seq[Polyline] =
   ## Turns the curves into line segments that stay within `tolerance` of the
   ## curve. Each subpath becomes one polyline. Closed subpaths don't repeat
-  ## their first point at the end.
+  ## their first point at the end. A subpath that is only a `moveTo` draws
+  ## nothing and is left out; one with a zero-length segment (`M p L p`, or
+  ## `M p Z`) is kept, since a stroke draws its caps as a dot.
   var current: Polyline
   var start = point(0, 0)
   var pen = point(0, 0)
@@ -597,7 +607,7 @@ func flatten*(path: BezPath, tolerance: float64): seq[Polyline] =
 
   template flush() =
     if open:
-      if current.points.len > 0:
+      if current.points.len > 1 or current.closed:
         result.add current
       current = Polyline()
       open = false

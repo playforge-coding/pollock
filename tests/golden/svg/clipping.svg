@@ -1,25 +1,25 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
   <defs>
-    <clipPath id="c1"><path d="M200 150 C200 199.706 159.706 240 110 240 C60.294 240 20 199.706 20 150 C20 100.294 60.294 60 110 60 C159.706 60 200 100.294 200 150 Z"/></clipPath>
+    <clipPath id="c1"><path d="M200 150 C200 199.7056 159.7056 240 110 240 C60.29437 240 20 199.7056 20 150 C20 100.2944 60.29437 60 110 60 C159.7056 60 200 100.2944 200 150 Z"/></clipPath>
     <clipPath id="c2"><path d="M220 40 L380 40 L380 260 L220 260 Z"/></clipPath>
-    <clipPath id="c3"><path d="M400 150 C400 205.228 355.228 250 300 250 C244.772 250 200 205.228 200 150 C200 94.772 244.772 50 300 50 C355.228 50 400 94.772 400 150 Z"/></clipPath>
+    <clipPath id="c3"><path d="M400 150 C400 205.2285 355.2285 250 300 250 C244.7715 250 200 205.2285 200 150 C200 94.77153 244.7715 50 300 50 C355.2285 50 400 94.77153 400 150 Z"/></clipPath>
   </defs>
   <rect width="400" height="300" fill="#f5f0e6"/>
   <g clip-path="url(#c1)">
   <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#285ab4" fill-opacity="0.7"/>
-  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#465aa0" fill-opacity="0.7" transform="matrix(0.866 0.5 -0.5 0.866 89.737 -34.904)"/>
-  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#645a8c" fill-opacity="0.7" transform="matrix(0.5 0.866 -0.866 0.5 184.904 -20.263)"/>
+  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#465aa0" fill-opacity="0.7" transform="matrix(0.8660254 0.5 -0.5 0.8660254 89.73721 -34.90381)"/>
+  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#645a8c" fill-opacity="0.7" transform="matrix(0.5 0.8660254 -0.8660254 0.5 184.9038 -20.26279)"/>
   <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#825a78" fill-opacity="0.7" transform="matrix(0 1 -1 0 260 40)"/>
-  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#a05a64" fill-opacity="0.7" transform="matrix(-0.5 0.866 -0.866 -0.5 294.904 129.737)"/>
-  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#be5a50" fill-opacity="0.7" transform="matrix(-0.866 0.5 -0.5 -0.866 280.263 224.904)"/>
+  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#a05a64" fill-opacity="0.7" transform="matrix(-0.5 0.8660254 -0.8660254 -0.5 294.9038 129.7372)"/>
+  <path d="M60 140 L160 140 L160 160 L60 160 Z" fill="#be5a50" fill-opacity="0.7" transform="matrix(-0.8660254 0.5 -0.5 -0.8660254 280.2628 224.9038)"/>
   </g>
   <g clip-path="url(#c2)">
   <g clip-path="url(#c3)">
   <path d="M0 0 L400 0 L400 300 L0 300 Z" fill="#e6783c"/>
-  <path d="M60 0 C60 33.137 33.137 60 0 60 C-33.137 60 -60 33.137 -60 0 C-60 -33.137 -33.137 -60 0 -60 C33.137 -60 60 -33.137 60 0 Z" fill="#3c2878" transform="matrix(1.5 0 0 0.6 300 150)"/>
+  <path d="M60 0 C60 33.13708 33.13708 60 0 60 C-33.13708 60 -60 33.13708 -60 0 C-60 -33.13708 -33.13708 -60 0 -60 C33.13708 -60 60 -33.13708 60 0 Z" fill="#3c2878" transform="matrix(1.5 0 0 0.6 300 150)"/>
   </g>
   </g>
   <path d="M0 0 L60 0 L60 60 L0 60 Z" fill="#000000" transform="matrix(0.5 0 0 0.5 20 20)"/>
   <path d="M0 0 L60 0 L60 60 L0 60 Z" fill="none" stroke="#ff0000" stroke-width="4" transform="matrix(0.5 0 0 0.5 20 20)"/>
-  <path d="M200 150 C200 199.706 159.706 240 110 240 C60.294 240 20 199.706 20 150 C20 100.294 60.294 60 110 60 C159.706 60 200 100.294 200 150 Z" fill="none" stroke="#000000" stroke-width="1"/>
+  <path d="M200 150 C200 199.7056 159.7056 240 110 240 C60.29437 240 20 199.7056 20 150 C20 100.2944 60.29437 60 110 60 C159.7056 60 200 100.2944 200 150 Z" fill="none" stroke="#000000" stroke-width="1"/>
 </svg>

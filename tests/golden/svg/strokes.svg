@@ -9,7 +9,7 @@
   <path d="M230 150 L250 30 L270 150" fill="none" stroke="#285aa0" stroke-width="14"/>
   <path d="M285 150 L305 30 L325 150" fill="none" stroke="#285aa0" stroke-width="14" stroke-linejoin="round"/>
   <path d="M340 150 L360 30 L380 150" fill="none" stroke="#285aa0" stroke-width="14" stroke-linejoin="bevel"/>
-  <path d="M150 230 C150 257.614 127.614 280 100 280 C72.386 280 50 257.614 50 230 C50 202.386 72.386 180 100 180 C127.614 180 150 202.386 150 230 Z" fill="none" stroke="#c8501e" stroke-width="6" stroke-linecap="round" stroke-dasharray="12 8"/>
+  <path d="M150 230 C150 257.6142 127.6142 280 100 280 C72.38576 280 50 257.6142 50 230 C50 202.3858 72.38576 180 100 180 C127.6142 180 150 202.3858 150 230 Z" fill="none" stroke="#c8501e" stroke-width="6" stroke-linecap="round" stroke-dasharray="12 8"/>
   <path d="M200 180 L380 190" fill="none" stroke="#000000" stroke-width="0.5"/>
   <path d="M200 200 L380 210" fill="none" stroke="#000000" stroke-width="1.5"/>
   <path d="M200 220 L380 230" fill="none" stroke="#000000" stroke-width="2.5"/>
