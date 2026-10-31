@@ -40,8 +40,13 @@ jobs:
       # prebuilt release (a nightly build of the release on macOS), so nothing
       # is compiled and no extra tools like nimgrep or nimsuggest get built.
       # mise 2026.10.16 and later panic on Windows while unpacking the Nim
-      # zip, so mise stays at 2026.10.15 until that is fixed.
+      # zip, so mise stays at 2026.10.15 until that is fixed. The plugin looks
+      # up the macOS nightly through the GitHub API with GITHUB_TOKEN (the
+      # action only sets MISE_GITHUB_TOKEN), and without it a rate-limited
+      # lookup falls back to building Nim from source.
       - uses: jdx/mise-action@v5.2.4
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
           version: "2026.10.15"
           plugins: nim https://github.com/elijahr/vfox-nim
