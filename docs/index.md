@@ -14,7 +14,7 @@ ctx.withClip(circle(150, 60, 40)):
 writePng(ctx.toImage(), "out.png")
 ```
 
-`newCpuContext` comes from the default backend. Replace it with `newSvgContext(200, 120)` and `ctx.toSvg()` and the same five drawing lines produce an SVG document.
+`newCpuContext` comes from the default backend, which `import pollock` brings in. For SVG, add `import pollock/backends/svg`, make the context with `newSvgContext(200, 120)` and write `ctx.toSvg()` to a file instead of the PNG: the drawing lines in between stay the same.
 
 ## What it gives you
 

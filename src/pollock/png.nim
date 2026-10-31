@@ -120,6 +120,7 @@ type
     bitBuf: uint32
     bitCnt: int
     output: seq[uint8]
+    maxOutput: int
 
 const
   lengthBase = [
@@ -179,10 +180,17 @@ func decodeSymbol(r: var Inflater, h: Huffman): int =
     code = code shl 1
   raise newException(PngError, "bad Huffman code")
 
+func reserve(r: var Inflater, n: int) =
+  # Fails before the output grows past what the caller expects, so a small
+  # stream that expands enormously can't exhaust memory.
+  if n > r.maxOutput - r.output.len:
+    raise newException(PngError, "deflate stream is larger than expected")
+
 func inflateCodes(r: var Inflater, lit, dist: Huffman) =
   while true:
     var sym = r.decodeSymbol(lit)
     if sym < 256:
+      r.reserve(1)
       r.output.add uint8(sym)
     elif sym == 256:
       return
@@ -197,6 +205,7 @@ func inflateCodes(r: var Inflater, lit, dist: Huffman) =
       let d = distBase[dsym] + int(r.bits(distExtra[dsym]))
       if d > r.output.len:
         raise newException(PngError, "distance too far back")
+      r.reserve(length)
       let start = r.output.len - d
       for i in 0 ..< length:
         r.output.add r.output[start + i]
@@ -213,6 +222,7 @@ func inflateStored(r: var Inflater) =
     raise newException(PngError, "stored block length mismatch")
   if r.pos + len > r.data.len:
     raise newException(PngError, "truncated stored block")
+  r.reserve(len)
   for i in 0 ..< len:
     r.output.add r.data[r.pos + i]
   r.pos += len
@@ -268,11 +278,12 @@ func inflateDynamic(r: var Inflater) =
         inc index
   r.inflateCodes(buildHuffman(all[0 ..< nlen]), buildHuffman(all[nlen ..^ 1]))
 
-func inflate*(data: sink seq[uint8]): seq[uint8] =
-  ## Decompresses a zlib stream.
+func inflate*(data: sink seq[uint8], maxOutput = high(int)): seq[uint8] =
+  ## Decompresses a zlib stream. Raises `PngError` if the output would grow
+  ## past `maxOutput` bytes.
   if data.len < 2 or (data[0] and 0x0F) != 8:
     raise newException(PngError, "not a zlib stream")
-  var r = Inflater(data: data, pos: 2)
+  var r = Inflater(data: data, pos: 2, maxOutput: maxOutput)
   while true:
     let final = r.bits(1)
     # Bound to a name first: the JS backend evaluates a `case` selector once
@@ -377,8 +388,16 @@ func decodePng*(data: openArray[uint8]): ImageData =
       raise newException(PngError, "truncated chunk " & kind)
     case kind
     of "IHDR":
-      width = int(readU32(data, start))
-      height = int(readU32(data, start + 4))
+      if len < 13:
+        raise newException(PngError, "IHDR chunk is too short")
+      # PNG limits both dimensions to 2^31 - 1. Checked before converting,
+      # since `int` is 32 bits on the JS target.
+      let w = readU32(data, start)
+      let h = readU32(data, start + 4)
+      if w > 0x7FFF_FFFF'u32 or h > 0x7FFF_FFFF'u32:
+        raise newException(PngError, "image dimensions are out of range")
+      width = int(w)
+      height = int(h)
       bitDepth = int(data[start + 8])
       colorType = int(data[start + 9])
       interlace = int(data[start + 12])
@@ -414,7 +433,12 @@ func decodePng*(data: openArray[uint8]): ImageData =
       4
     else:
       raise newException(PngError, "bad color type")
-  let pixels = unfilter(inflate(idat), width, height, channels)
+  # The filtered data is one filter byte plus the pixels per row. Sized in
+  # floating point so a huge header can't overflow `int` on any target.
+  if (float64(width) * float64(channels) + 1) * float64(height) > float64(high(int)):
+    raise newException(PngError, "image is too large")
+  let expected = (width * channels + 1) * height
+  let pixels = unfilter(inflate(idat, maxOutput = expected), width, height, channels)
   case colorType
   of 0:
     result = image(width, height, ifGray8, pixels)

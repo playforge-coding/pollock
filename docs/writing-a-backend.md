@@ -7,24 +7,32 @@ A backend is a type with the ten procs of [`RenderContext`](context.md). It can 
 ```nim
 import pollock/context
 
-type MyContext* = object
-  transform: Affine
-  stack: seq[Affine]
-  error: string
-  # ... whatever the native API needs
+type
+  MyState = object
+    ## Everything `save` and `restore` cover: the transform and the clip.
+    transform: Affine
+    clip: MyClip # however the native API represents a clip
+
+  MyContext* = object
+    state: MyState
+    stack: seq[MyState]
+    error: string
+    # ... whatever the native API needs
 
 proc newMyContext*(...): MyContext =
-  MyContext(transform: affineIdentity)
+  MyContext(state: MyState(transform: affineIdentity))
 
 proc clear*(ctx: var MyContext, color: Color) = ...
 proc fillPath*(ctx: var MyContext, path: BezPath, paint: Paint, rule: FillRule) = ...
 proc strokePath*(ctx: var MyContext, path: BezPath, paint: Paint, style: StrokeStyle) = ...
 proc clipPath*(ctx: var MyContext, path: BezPath, rule: FillRule) = ...
-proc save*(ctx: var MyContext) = ctx.stack.add ctx.transform
+  # intersect ctx.state.clip with the path, under ctx.state.transform
+proc save*(ctx: var MyContext) = ctx.stack.add ctx.state
 proc restore*(ctx: var MyContext) =
-  if ctx.stack.len > 0: ctx.transform = ctx.stack.pop()
-proc transform*(ctx: var MyContext, affine: Affine) = ctx.transform = ctx.transform * affine
-proc currentTransform*(ctx: MyContext): Affine = ctx.transform
+  if ctx.stack.len > 0: ctx.state = ctx.stack.pop()
+proc transform*(ctx: var MyContext, affine: Affine) =
+  ctx.state.transform = ctx.state.transform * affine
+proc currentTransform*(ctx: MyContext): Affine = ctx.state.transform
 proc drawImage*(ctx: var MyContext, image: ImageData, dst: Rect, interp: Interpolation) = ...
 proc finish*(ctx: var MyContext): RenderResult =
   if ctx.error.len > 0: failure(ctx.error) else: success()
@@ -32,6 +40,8 @@ proc finish*(ctx: var MyContext): RenderResult =
 static:
   doAssert MyContext is RenderContext
 ```
+
+Keep the transform and the clip together in one state object, and save and restore that object whole. Saving only the transform is an easy mistake: a clip set inside `withClip` would then stay in force after the block ends. If the native API has its own save and restore (`cairo_save`, `CGContextSaveGState`), call it from `save` and `restore` as well.
 
 The `static` assertion at the end is worth keeping: it turns a missing or mistyped proc into a compile error in the backend's own module, with a message about the concept, instead of an error at some call site in a user's program.
 

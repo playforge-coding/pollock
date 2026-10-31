@@ -326,7 +326,9 @@ proc strokePath*(ctx: var CpuContext, path: BezPath, paint: Paint, style: Stroke
 
 proc clipPath*(ctx: var CpuContext, path: BezPath, rule: FillRule) =
   var mask = ClipMask(coverage: newSeq[float32](ctx.width * ctx.height))
-  ctx.forCoverage(ctx.devicePolylines(path), rule, x, y, cov):
+  # Bound first: `forCoverage` is a template and would flatten twice.
+  let polylines = ctx.devicePolylines(path)
+  ctx.forCoverage(polylines, rule, x, y, cov):
     mask.coverage[y * ctx.width + x] = cov
   ctx.state.clip = mask
 

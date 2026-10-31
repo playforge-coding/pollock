@@ -34,14 +34,21 @@ suite "samples":
       check renderSvg(i).len > 100
 
   when not defined(js):
+    # Goldens are written only by `nimble goldens`. In a normal run a missing
+    # golden is a failure, so a scene added without its golden can't pass by
+    # comparing against itself.
     test "cpu goldens":
-      createDir(goldenDir / "cpu")
       for i, name in sampleNames:
         let path = goldenDir / "cpu" / &"{name}.png"
         let img = renderCpu(i)
-        if updateGoldens or not fileExists(path):
+        if updateGoldens:
+          createDir(path.parentDir)
           writePng(img, path)
           echo "wrote ", path
+        checkpoint(&"{name}: {path}")
+        if not fileExists(path):
+          fail()
+          continue
         let golden = readPng(path)
         let diff = compareImages(img, golden)
         checkpoint(
@@ -50,12 +57,15 @@ suite "samples":
         check diff.matches
 
     test "svg goldens":
-      createDir(goldenDir / "svg")
       for i, name in sampleNames:
         let path = goldenDir / "svg" / &"{name}.svg"
         let doc = renderSvg(i)
-        if updateGoldens or not fileExists(path):
+        if updateGoldens:
+          createDir(path.parentDir)
           writeFile(path, doc)
           echo "wrote ", path
-        checkpoint(name)
+        checkpoint(&"{name}: {path}")
+        if not fileExists(path):
+          fail()
+          continue
         check doc == readFile(path)

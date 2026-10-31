@@ -111,8 +111,14 @@ suite "svg backend":
     check "<clipPath id=\"c1\">" in doc
     check "<clipPath id=\"c2\"><path d=\"M0 0 L2 0 L2 2 L0 2 Z\" transform=\"matrix(2 0 0 2 0 0)\"/></clipPath>" in
       doc
-    # The last fill is outside both groups.
-    check doc.find("</g>\n  </g>") < doc.rfind("<path")
+    # The inner fill is in both groups, the middle one only in the outer
+    # group and the last one outside both.
+    let square = "<path d=\"M0 0 L1 0 L1 1 L0 1 Z\" fill=\"#000000\""
+    let body =
+      "  <g clip-path=\"url(#c1)\">\n" & "  <g clip-path=\"url(#c2)\">\n" & "  " & square &
+      " transform=\"matrix(2 0 0 2 0 0)\"/>\n" & "  </g>\n" & "  " & square & "/>\n" &
+      "  </g>\n" & "  " & square & "/>\n" & "</svg>\n"
+    check doc.endsWith("  </defs>\n" & body)
 
   test "unbalanced clips are closed in the output":
     var ctx = newSvgContext(10, 10)

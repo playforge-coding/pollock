@@ -43,7 +43,7 @@ When a change alters rendering on purpose, run `nimble goldens`, look at the new
 
 ## Adding a sample scene
 
-Add a proc to `src/pollock/samples.nim`, a name to `sampleNames` and a branch to `drawSample`, then run `nimble goldens` and commit the new golden files. A scene should exercise one area (a feature or an edge case) so a failure points somewhere.
+Add a proc to `src/pollock/samples.nim`, a name to `sampleNames` and a branch to `drawSample`, then run `nimble goldens` and commit the new golden files. A normal test run never writes goldens, so a scene without them fails until they are committed. A scene should exercise one area (a feature or an edge case) so a failure points somewhere.
 
 ## Documentation
 
