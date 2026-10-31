@@ -14,7 +14,7 @@ Finished items stay in their section with a check mark, so each section shows ho
 - [ ] Arcs and elliptical arcs as path elements.
 - [ ] Exact bounding boxes for curves (today the box is around the control points).
 - [ ] Text: the `TextEngine` concept, `GlyphRun`, the `drawGlyphs` primitive, layouts with ranged attributes, hit testing. Engines and backends combine freely; see the [text design](architecture.md#text-planned). The API grows only as fast as every engine and backend can implement it.
-- [ ] A shared glyph outline cache, so every backend can draw text by filling outlines.
+- [ ] A shared glyph cache, so every backend can draw text with the primitives it already has: outlines and color layers with `fillPath`, bitmap glyphs with `drawImage`.
 - [ ] Color glyphs: COLR layers, sbix and CBDT bitmaps.
 - [ ] The `RasterContext` concept, shared by the backends that render into memory.
 - [ ] A type-erased `DynContext` for choosing a backend at runtime.
@@ -26,7 +26,7 @@ Finished items stay in their section with a check mark, so each section shows ho
 - [x] CPU backend: fills, strokes, clips, gradients, images, exact-area antialiasing.
 - [x] SVG backend: everything the CPU backend does, as a document.
 - [ ] Pure Nim text engine (`opentype`): OpenType parsing, shaping for Latin, Greek and Cyrillic, bidirectional text, line breaking.
-- [ ] HarfBuzz as a shaper for the pure Nim engine: the native library under C and Objective-C, harfbuzzjs (WebAssembly) under JavaScript, so every script works on every target.
+- [ ] HarfBuzz as a shaper for the pure Nim engine: the native library under C and Objective-C, harfbuzzjs (WebAssembly) under JavaScript, so that every script works on every target.
 - [ ] Pure Nim text engine: complex scripts in the Nim shaper.
 - [ ] CPU backend: text, by filling glyph outlines.
 - [ ] SVG backend: text as glyph paths.
