@@ -91,7 +91,7 @@ Errors: Cairo's status is sticky, so the first failing call leaves the cairo_t u
 
 Differences from the CPU backend: antialiasing differs by a few levels along edges, and Cairo measures dash phases along the exact curve rather than the flattened polyline, so dash ends on curves can shift by a fraction of a pixel. The conformance test allows 0.5% of the pixels in each sample scene to differ by more than 32 levels, which the current samples stay well under. Gradients interpolate straight alpha, as the rules require; a test checks it. `clear` on a wrapped cairo_t also drops any clip the host had set, since `cairo_reset_clip` is the only way out of Cairo's clip; a draw handler that needs to keep the host's clip should fill a rectangle instead.
 
-Not supported yet: text. The plan is Pango, once the text API exists.
+Not supported yet: text. Once the text API exists, Cairo will draw Pango's glyph runs natively and fonts from the other engines through FreeType; see the [text design](architecture.md#text-planned).
 
 ## Planned native backends
 
@@ -99,4 +99,6 @@ The [roadmap](roadmap.md) has the order. The plan for each, so that the shape of
 
 - **Core Graphics**: Core Graphics and Core Text are C APIs, so the drawing works under both `nim c` and `nim objc`. The Objective-C parts (getting a `CGContextRef` from a view, `CALayer` and `NSImage` bridging) sit behind one small interface: `importobjc` under the Objective-C target, a `.m` shim compiled with `{.compile.}` under the C target.
 - **Direct2D**: COM calls through vtables from C, with DirectWrite for text and WIC for bitmaps.
-- **WebGL2**: shapes go through a shared GPU tessellation layer (flattened outlines to triangles, stencil-then-cover fills, batching), antialiasing through a multisampled renderbuffer, text through Canvas 2D on an `OffscreenCanvas`. The tessellation layer is meant to be reusable by a WebGPU backend.
+- **WebGL2**: shapes go through a shared GPU tessellation layer (flattened outlines to triangles, stencil-then-cover fills, batching), antialiasing through a multisampled renderbuffer, text from the pure Nim engine through a glyph atlas texture. The tessellation layer is meant to be reusable by a WebGPU backend.
+
+Text engines and backends will combine freely: any backend can draw the layout of any engine on the same platform, so Core Graphics can draw Parley's text and the CPU backend can draw Core Text's. The [text design](architecture.md#text-planned) has the full table.

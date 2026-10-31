@@ -14,9 +14,9 @@ Backends:
 | `cairo` | `pollock/backends/cairo` | `c`, `objc` | done, no text (Pango is the plan). Needs Cairo through `pkg-config`. Not NimScript: the VM can't call C, so importing it there is a compile error. |
 | `coregraphics` | `pollock/backends/coregraphics` | `objc`, and `c` through a wrapper | planned: Core Graphics, Core Text |
 | `direct2d` | `pollock/backends/direct2d` | `c` | planned: Direct2D, DirectWrite, WIC |
-| `webgl2` | `pollock/backends/webgl2` | `js` | planned: WebGL2, Canvas 2D for text |
+| `webgl2` | `pollock/backends/webgl2` | `js` | planned: WebGL2, text through a glyph atlas |
 
-The backend set is open. A backend is any type that satisfies the `RenderContext` concept, so a third-party package (a WebGPU backend, say) plugs in without changes to pollock itself.
+The backend set is open. A backend is any type that satisfies the `RenderContext` concept, so a third-party package (a WebGPU backend, say) plugs in without changes to pollock itself. Text engines will be a second open set that combines freely with the backends (see the text line in the contract).
 
 ### Layers
 
@@ -74,7 +74,7 @@ These rules decide what every backend has to agree on. Changing one is an API ch
 - State: `save` and `restore` cover the transform and the clip. Paints are passed per call, not stored as state.
 - `clear` paints the whole target and ignores the transform and the clip.
 - The primitives are named `fillPath`, `strokePath` and `clipPath`, and the generic helpers in `draw.nim` are `fill`, `stroke` and `clip`, so the concept never matches the helpers. Keep it that way when adding primitives: a primitive and a helper must not share a name unless the helper uses `mixin`.
-- Text: planned. A `Text` factory will build `TextLayout`s with ranged attributes, and the API grows only when every backend can implement the addition.
+- Text: planned, designed in the Text section of `docs/architecture.md`. Layout and drawing are separate. A `TextEngine` concept (`pollock/text`) loads fonts from bytes, builds `TextLayout`s with ranged attributes and gives glyph outlines; a backend draws `GlyphRun`s (a font as bytes, face index and variation coordinates, a size, glyph ids with user-space positions) through one new primitive, `drawGlyphs`, natively when it can make a font from the bytes and by filling outlines otherwise. So every engine pairs with every backend on the same platform. Backends are generic over the engine, a `pollockTextEngine` define picks the default one, and glyphs are drawn unhinted with grayscale antialiasing so pairings compare with the reference (CPU with the pure Nim engine). Font lookup and fallback belong to the engine. The pure Nim engine (`opentype`) takes a shaper: its own Nim one, or HarfBuzz (the native library under `c`, harfbuzzjs passed in by the application under `js`, behind `-d:pollockHarfBuzz`), so every script works on every target before the Nim shaper covers it. Canvas 2D text and pretext were ruled out as engines because they give no glyph ids or outlines. The concepts grow only when every engine and backend can implement the addition.
 
 ### Targets and platform code
 
@@ -82,10 +82,10 @@ These rules decide what every backend has to agree on. Changing one is an API ch
 - A native backend compiles for the targets in its table row and uses `ptr` for the library's handles. Its test file guards its whole body with the backend's define (`when defined(pollockCairo) and not defined(js)`) and prints that it was skipped otherwise, so `nimble test` and `nimble testjs` run everywhere; a task (`nimble testcairo`) runs it with the define, and CI runs that task on the platforms where the library installs. Nothing in the core or `pollock.nim` may import a native backend.
 - The JS backend evaluates a `case` selector once per branch. Bind a selector with side effects to a `let` first (`png.nim` does this for the deflate block type). Unsigned arithmetic and `shl`/`shr` on `uint32` behave the same on both targets. `int` is 32 bits on JS for range and overflow checks, so `int(x)` of a `uint32` above 2^31 - 1 raises there: check the unsigned value first, and size large products in `float64`.
 - Pick code by target with `when defined(js)`, `when defined(objc)`, `when defined(macosx)`, `when defined(windows)`. Keep those branches inside backends and the few core modules that need them.
-- Planned native backends, so the shape is settled before they are written. `cairo` is the model: bind only what the backend calls, get the flags from `pkg-config`, own the handles with `=destroy`, keep the transform in Nim. Its text will go through `pango.h` and `pangocairo.h` once the text API exists.
+- Planned native backends, so the shape is settled before they are written. `cairo` is the model: bind only what the backend calls, get the flags from `pkg-config`, own the handles with `=destroy`, keep the transform in Nim. Native text engines (`pollock/engines/pango`, `coretext`, `directwrite`) follow the same rules, with their own define and guarded test file. Cairo will draw Pango's runs with `pango_cairo_show_glyph_string` and other engines' fonts through FreeType. Engines and backends that need Rust (Parley, tiny-skia, vello_cpu) live in separate packages, each with a C ABI shim crate whose header cbindgen writes, so pollock itself keeps no dependencies.
   - `coregraphics`: Core Graphics and Core Text are C APIs, so the drawing is plain `importc` and works under both targets. The Objective-C parts (getting a `CGContextRef` from an `NSView` or `NSGraphicsContext`, `CALayer` integration, `NSImage` bridging) live behind one small interface: `importobjc` and `{.emit.}` under `nim objc`, a `.m` shim compiled with `{.compile.}` under `nim c`. Both builds go through the same Nim procs, and tests run under both targets.
   - `direct2d`: COM interfaces for `ID2D1*` and `IDWrite*` called through their vtables from C. winim covers base COM types and WIC but has no Direct2D or DirectWrite bindings, so those are written here.
-  - `webgl2`: bindings to `WebGL2RenderingContext` through `importjs`. Shapes go through a shared `pollock/gpu` layer (triangulating flattened outlines, stencil-then-cover fills, batching) kept free of WebGL types so a WebGPU backend can reuse it; antialiasing through a multisampled renderbuffer resolved with `blitFramebuffer`; text laid out with Canvas 2D `measureText` and rasterized into a texture on an `OffscreenCanvas`.
+  - `webgl2`: bindings to `WebGL2RenderingContext` through `importjs`. Shapes go through a shared `pollock/gpu` layer (triangulating flattened outlines, stencil-then-cover fills, batching) kept free of WebGL types so a WebGPU backend can reuse it; antialiasing through a multisampled renderbuffer resolved with `blitFramebuffer`; text from the pure Nim engine, rasterized into a glyph atlas texture. Canvas 2D text can't be a text engine, since it gives neither glyph ids nor outlines.
 - pollock does not open windows or run event loops. Each backend wraps a native target the caller already has, or an offscreen one of its own. The example window in `examples/` gets its window from SDL3; keep windowing out of `src/`.
 
 ## Building and testing
@@ -141,7 +141,7 @@ The docs are a [Zensical](https://zensical.org) site: `zensical.toml` at the roo
 - `backends.md`: one section per backend, covering how to make one, its quirks and what it doesn't support yet, and the plan for the native ones.
 - `writing-a-backend.md`: implementing the concept in a separate package, what pollock provides, running the samples against it.
 - `examples.md`: the interactive scenes in `examples/`: installing SDL3, running the window, its keys, what each scene shows, how a scene and the window fit together, and writing a new scene. Keep the keys table in step with `window.nim`.
-- `architecture.md` and `development.md`: for people working on pollock.
+- `architecture.md` and `development.md`: for people working on pollock. `architecture.md` also holds the text design (engines, glyph runs, the table of which engine pairs with which backend) until text is built and documented in the user pages.
 - `roadmap.md`: what's done and what's planned.
 
 Compile the examples you put in the docs before committing them.

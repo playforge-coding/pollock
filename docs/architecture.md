@@ -75,3 +75,112 @@ Everything in `src/` except the native backends compiles under `nim c`, `nim obj
 - The JavaScript backend evaluates a `case` selector once per branch. Bind a selector with side effects to a `let` first; `png.nim` does this for the deflate block type.
 - Unsigned integer arithmetic behaves the same on both targets, as do the `shl` and `shr` operators on `uint32`, so checksums and bit readers are fine to write plainly.
 - `int` is 32 bits on JavaScript for range and overflow checks. Converting a `uint32` above 2^31 - 1 to `int` raises there, so check the unsigned value first, and compute sizes that could be large in `float64`. `png.nim` does both for the image dimensions.
+
+## Text (planned)
+
+None of this is written yet. It is the design, settled first so that the text code and the backends can be built independently of each other.
+
+### Layout and drawing are separate
+
+Drawing text is two jobs that don't depend on each other:
+
+- **Layout**: finding fonts and fallbacks, shaping, bidirectional text, line breaking, metrics and hit testing. The result is positioned glyphs.
+- **Glyph drawing**: turning those glyphs into pixels or document elements.
+
+A **text engine** does layout and a backend does the drawing. They meet at a `GlyphRun`: one font at one size, and a list of glyph ids with their positions. A run carries nothing specific to a library, so any engine can feed any backend that runs on the same platform. Each of the two sets stays open, like the backend set is today: a package can add an engine without touching any backend, and the other way around.
+
+```mermaid
+flowchart LR
+  app[Application code] -->|string and attributes| eng[TextEngine]
+  eng -->|TextLayout| app
+  app -->|drawLayout| ctx[RenderContext]
+  ctx -->|drawGlyphs| native[native glyph drawing]
+  ctx -->|outline requests| eng
+  eng -->|BezPath per glyph| ctx
+  ctx -->|fillPath| raster[the backend's own fills]
+```
+
+### The pieces
+
+- **`TextEngine`**, a concept in `pollock/text`. It loads fonts from bytes, builds a `TextLayout` from a string with ranged attributes (family, size, weight, style, paint and so on), and answers for the layout: its glyph runs, line metrics and hit testing. It also gives the outline of any glyph as a `BezPath`. It is kept as small as `RenderContext` and grows by the same rule, only when every engine can implement the addition.
+- **`GlyphRun`**: the engine's handle for a font, the size, and the glyphs as (id, x, y) in user space, with y on the baseline. The font handle resolves to the font's bytes, face index and variation coordinates.
+- **One new primitive**, `drawGlyphs(ctx, run, paint)`, and a helper in `draw` that draws a whole layout at a point, calling the primitive for each run.
+- **Backends are generic over the engine.** The context keeps the engine it was made with (shared with the layouts and any other contexts) so it can ask for outlines. Each pairing gets a type alias, and `CpuContext` keeps meaning the all-Nim one. Because the engine is a type parameter, a backend picks its native path at compile time: `when T is PangoEngine` in the Cairo backend can draw Pango's runs through `pango_cairo_show_glyph_string`.
+- **A second define**, `pollockTextEngine`, next to `pollockBackend`, picks the engine for the default context that `import pollock` exports.
+
+### Drawing a run
+
+Every backend can draw a run without native text support: ask the engine for each glyph's outline and fill it with the backend's own path filling. A shared outline cache in pollock keeps outlines in font units, keyed by font and glyph id, and scales them per run. That fallback is why `drawGlyphs` can be part of the concept from the first release: every backend, the recording one included, can implement it.
+
+A backend with native glyph drawing uses it when it can make a native font from the run's font bytes:
+
+| Backend | How it draws a run |
+| --- | --- |
+| CPU, tiny-skia, vello_cpu | Outlines filled as paths. |
+| SVG | One path per glyph. `<text>` elements may come later as an option, for selectable text, at the price of the viewer doing its own layout. |
+| Cairo | Pango's runs through `pango_cairo_show_glyph_string`; runs from other engines through `cairo_show_glyphs`, with a FreeType face made from the bytes. |
+| Core Graphics | Core Text's runs through `CTFontDrawGlyphs`; for other engines, a `CGFont` made from the bytes with `CGFontCreateWithDataProvider`. |
+| Direct2D | `DrawGlyphRun`; fonts from other engines are loaded through the in-memory font file loader of `IDWriteFactory5`. |
+| WebGL2 | Outlines rasterized into a glyph atlas texture. |
+| Recording | Records the run. |
+
+Color glyphs (emoji and other color fonts) aren't outlines. The engine reports what each glyph is: layers of outlines with paints (COLR), a bitmap (sbix, CBDT) or an SVG document. Layers become fills with pollock paints, and bitmaps go through `drawImage`. COLRv1 also uses sweep gradients and blend modes, which pollock doesn't have yet, so those glyphs draw their base layers until it does. SVG glyphs are not planned.
+
+### Contract additions
+
+- Glyph positions are in user space, and the transform applies to them as it does to a path.
+- A font is its bytes, face index and variation coordinates, never a system handle, so any backend can build its own native font from it.
+- Font lookup and fallback belong to the engine. Parley on Core Graphics finds fonts the way Parley does, not the way Core Text does.
+- Glyphs are drawn unhinted with grayscale antialiasing, so every pairing can be compared with the reference. Hinting may come later as an option that a backend is allowed to ignore.
+
+### Engines and backends
+
+Every pairing on one platform works. The cells say which part does the drawing and which does the layout:
+
+| Backend | Pure Nim | Parley | Pango | Core Text | DirectWrite |
+| --- | --- | --- | --- | --- | --- |
+| CPU (pure Nim) | all Nim (the reference) | Nim drawing, Parley layout | Nim drawing, Pango layout | Nim drawing, Core Text layout | Nim drawing, DirectWrite layout |
+| tiny-skia | tiny-skia drawing, Nim layout | all Rust | tiny-skia drawing, Pango layout | tiny-skia drawing, Core Text layout | tiny-skia drawing, DirectWrite layout |
+| vello_cpu | vello_cpu drawing, Nim layout | all Rust, all Linebender | vello_cpu drawing, Pango layout | vello_cpu drawing, Core Text layout | vello_cpu drawing, DirectWrite layout |
+| Cairo | Cairo drawing, Nim layout | Cairo drawing, Parley layout | the GTK stack | Cairo drawing, Core Text layout | Cairo drawing, DirectWrite layout |
+| Core Graphics | Core Graphics drawing, Nim layout | Core Graphics drawing, Parley layout | Core Graphics drawing, Pango layout | all Apple APIs | not possible |
+| Direct2D | Direct2D drawing, Nim layout | Direct2D drawing, Parley layout | Direct2D drawing, Pango layout | not possible | all Windows APIs |
+| SVG | glyph paths, Nim layout | glyph paths, Parley layout | glyph paths, Pango layout | glyph paths, Core Text layout | glyph paths, DirectWrite layout |
+| WebGL2 | glyph atlas, Nim layout | not on JS | not on JS | not on JS | not on JS |
+
+Where each one runs:
+
+- Core Text and Core Graphics exist only on Apple platforms, and DirectWrite and Direct2D only on Windows, which is why those pairings are not possible.
+- Pango comes with Linux desktops and installs on macOS (Homebrew) and Windows (MSYS2). It needs a font map, from `pangocairo` or `pangoft2`, so it brings in Cairo or FreeType even when Cairo doesn't draw. A backend other than Cairo gets the outlines and the font bytes from Pango's HarfBuzz font (`pango_font_get_hb_font`, then `hb_font_draw_glyph` and `hb_face_reference_blob`).
+- Parley does the layout. Font discovery and fallback come from fontique, and outlines from skrifa. One package wraps all three.
+- On the JavaScript target only the pure Nim engine runs, with the CPU, SVG and WebGL2 backends. It covers every script there by shaping with HarfBuzz compiled to WebAssembly (see [the pure Nim engine](#the-pure-nim-engine)). The Rust parts build for `c` and `objc`; a WebAssembly build of Parley is possible later but not planned. The browser's own text can't be an engine (see [what was ruled out](#ruled-out)), so WebGL2 draws the pure Nim engine's glyphs through an atlas.
+
+### Where the code lives
+
+- In pollock: the `TextEngine` concept, `GlyphRun` and the outline cache in `pollock/text`, and the engines under `pollock/engines/`: `opentype` (pure Nim, the default), `pango`, `coretext` and `directwrite`. The native engines follow the rules for native backends: their own define and guarded test file, a `nimble` task, and nothing in the core imports them.
+- In separate packages, because they need Rust: `pollock-parley` (an engine), `pollock-tinyskia` and `pollock-vellocpu` (backends). Each has a small crate that exposes a C ABI over the library: opaque handles that Nim frees from `=destroy`, plain `repr(C)` types at the boundary, coarse calls (a whole layout in, flat arrays of runs out), and no unwinding across it (`panic = "abort"`, or `catch_unwind` turned into a status code that `finish` reports). cbindgen writes the C header from `build.rs`, the Nim bindings use it through `importc` and `header`, as the Cairo backend does with `cairo.h`, and the package's `nimble` tasks run `cargo build` first.
+
+### The CPU family
+
+The pure Nim renderer, tiny-skia and vello_cpu all render into memory and read the picture back. A small `RasterContext` concept (`RenderContext` plus `width`, `height`, `toImage` and `pixel`) lets the example window, `tools/rendersamples.nim` and the tests take any of them, and Cairo's offscreen contexts satisfy it too. It may later gain a way to hand over the pixels without a copy for texture uploads, since tiny-skia's pixmap is already premultiplied 8-bit RGBA and the pure Nim backend converts from `float32`.
+
+### Testing text
+
+The reference pairing, the CPU backend with the pure Nim engine, gets exact goldens for text samples drawn with an openly licensed font kept in `tests/`. Every other pairing is compared with those goldens at a tolerance, the way `tcairo` compares Cairo today, looser for text than for shapes. CI runs the pairings whose libraries install on each platform.
+
+### The pure Nim engine
+
+It covers OpenType parsing (`cmap`, `glyf`, CFF and CFF2 outlines, metrics, variations), the Unicode bidirectional algorithm (UAX 9) and line breaking (UAX 14), with the Unicode data generated into Nim tables, and shaping. Fonts come from the application as bytes; looking up installed fonts works off the JavaScript target only.
+
+Shaping is the one part that is hard to finish: Arabic joining, Indic reordering and the other complex scripts take years of work to get right. So it sits behind a seam of its own inside the engine. The engine takes a **shaper**, which turns a run of text in one font, script and direction into glyph ids with advances and offsets:
+
+- **The Nim shaper**, the default. It applies GSUB and GPOS and starts with what Latin, Greek and Cyrillic need: ligatures, kerning and mark placement. Complex scripts come later.
+- **HarfBuzz.** On `c` and `objc` it is the native library, found through `pkg-config` (it is installed wherever Pango is). On the JavaScript target it is [harfbuzzjs](https://github.com/harfbuzz/harfbuzzjs), HarfBuzz's own WebAssembly build, which runs in browsers and in Node, so `nimble testjs` can test it. Both take the font's bytes, so the engine's fonts and runs stay the same whichever shaper is used.
+
+With HarfBuzz, the pure Nim engine handles every script on every target today, and the Nim shaper can take over script by script as it grows. The application loads harfbuzzjs itself and passes the instance in, so pollock keeps no dependencies on JS either. Instantiating WebAssembly is asynchronous, so on JS the engine is made from an instance that is already loaded and never waits inside a constructor. The shaper module follows the rules for native code: its own define (`pollockHarfBuzz`), a test file that skips itself without it, and a `nimble` task that runs it under C and, with harfbuzzjs installed from npm, under JS.
+
+### Ruled out
+
+- **Canvas 2D text as an engine.** `measureText` gives widths and `fillText` draws strings, but neither gives glyph ids or outlines, so its layouts can't become glyph runs.
+- **[pretext](https://github.com/chenglou/pretext).** It breaks lines quickly by measuring text segments with Canvas 2D and returns lines of text for `fillText` to draw, so it has the same limits as Canvas 2D text: no glyph runs, so the CPU and SVG backends couldn't draw its output and nothing could clip to it. It also needs a canvas to measure with, which Node doesn't have, so the JavaScript tests couldn't run it. It fits a page laid out by the browser, not pollock's model. A Canvas 2D backend that draws strings could use it someday as a separate kind of text, outside the glyph run model.
+- **All of Parley in WebAssembly as the answer for JS.** It would work, but it is a much bigger download than HarfBuzz and needs a JS glue layer, while the gap it would fill on JS is mostly shaping, which HarfBuzz covers alone.
