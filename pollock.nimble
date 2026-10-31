@@ -20,8 +20,17 @@ task testjs, "Run the tests under the JavaScript target with Node":
     if name.startsWith("t") and name.endsWith(".nim"):
       exec "nim js -r -d:nodejs --hints:off --outdir:tests/jsout " & path
 
-task samples, "Render the sample scenes with the CPU and SVG backends into out/":
-  exec "nim r -d:release --hints:off tools/rendersamples.nim out"
+task testcairo, "Run the Cairo backend tests (needs cairo through pkg-config)":
+  exec "nim c -r --hints:off -d:pollockCairo --outdir:tests/bin tests/tcairo.nim"
+
+task samples, "Render the sample scenes with every backend that can run here into out/":
+  # The Cairo backend joins in when pkg-config finds cairo.
+  let cairo =
+    if gorgeEx("pkg-config --exists cairo").exitCode == 0:
+      " -d:pollockCairo"
+    else:
+      ""
+  exec "nim r -d:release --hints:off" & cairo & " tools/rendersamples.nim out"
 
 task goldens, "Rewrite the golden files in tests/golden from the current output":
   exec "nim r --hints:off -d:pollockUpdateGoldens tests/tsamples.nim"

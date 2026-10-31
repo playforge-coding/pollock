@@ -1,13 +1,13 @@
 # Backends
 
-A backend is a type that satisfies [`RenderContext`](context.md). pollock ships two, both pure Nim, and the `pollock` module exports the default one (currently `cpu` everywhere). Import a backend module directly to use a specific one, or set `-d:pollockBackend=<module path>` to change the default.
+A backend is a type that satisfies [`RenderContext`](context.md). pollock ships three: two pure Nim ones and one over Cairo. The `pollock` module exports the default one (currently `cpu` everywhere). Import a backend module directly to use a specific one, or set `-d:pollockBackend=<module path>` to change the default.
 
 | Backend | Module | Target | Status |
 | --- | --- | --- | --- |
 | CPU | `pollock/backends/cpu` | any | done, no text |
 | SVG | `pollock/backends/svg` | any | done, no text |
 | Recording | `pollock/recording` | any | done |
-| Cairo | `pollock/backends/cairo` | Linux and others | planned |
+| Cairo | `pollock/backends/cairo` | C and Objective-C, where Cairo is installed | done, no text |
 | Core Graphics | `pollock/backends/coregraphics` | macOS | planned |
 | Direct2D | `pollock/backends/direct2d` | Windows | planned |
 | WebGL2 | `pollock/backends/webgl2` | browsers | planned |
@@ -61,11 +61,39 @@ assert ctx.kinds == @[ckFillPath]
 assert ctx.commands[0].paint == solid(red)
 ```
 
+## Cairo
+
+Draws through [Cairo](https://www.cairographics.org). The module finds Cairo through `pkg-config` when it compiles, so the development package has to be installed: `libcairo2-dev` on Debian and Ubuntu, `cairo-devel` on Fedora, `cairo` from Homebrew. It compiles under the C and Objective-C targets, not JavaScript.
+
+```nim
+import pollock/backends/cairo
+
+var ctx = newCairoContext(width, height)   # an offscreen ARGB32 image surface, transparent black
+# ... draw ...
+let img = ctx.toImage()                    # ImageData, straight-alpha RGBA8 by default
+let c = ctx.pixel(x, y)                    # one pixel as a Color
+```
+
+The other constructor wraps a `cairo_t` the caller already has, such as the one GTK passes to a draw function, as a plain `pointer` so it works with any Cairo binding:
+
+```nim
+var ctx = newCairoContext(cr)   # cr: pointer to a cairo_t
+```
+
+pollock's user space is then the cairo_t's user space at the time it was wrapped. The context keeps a reference to the cairo_t and drops it when the context is destroyed. `ctx.cairoHandle` hands the cairo_t back for calls the backend doesn't cover. `toImage` and `pixel` work when the target is an image surface; for other surfaces `toImage` returns an empty image. A `CairoContext` can't be copied; move it or pass it by `var`.
+
+How it draws: Cairo has native paths, both fill rules, stroking with caps, joins, miter limits and dashes, clipping, gradients with all three extend modes, and image patterns, so every primitive is a few Cairo calls. Quadratic curves are raised to cubics, which Cairo has. The transform is mirrored in Nim and set on the cairo_t before each drawing call; a singular transform skips the call, since it draws nothing and would otherwise put the cairo_t into a permanent error state (a clip under one clips everything). The clip lives in Cairo's own state stack: `save` and `restore` call `cairo_save` and `cairo_restore`, and `clear` resets the clip inside a save/restore pair and paints with the `SOURCE` operator, so a transparent color really clears. A linear gradient with no length or a radial one with no radius paints its last stop, as the rules say, without relying on Cairo's own handling of those. Images are copied into an ARGB32 surface (premultiplied, in Cairo's native byte order) and painted as a pattern with `EXTEND_PAD` and the `NEAREST` or `BILINEAR` filter.
+
+Errors: Cairo's status is sticky, so the first failing call leaves the cairo_t unusable. `finish` reports it, and the caller makes a new context, as the [rules](context.md#the-rules) say for a lost device.
+
+Differences from the CPU backend: antialiasing differs by a few levels along edges, and Cairo measures dash phases along the exact curve rather than the flattened polyline, so dash ends on curves can shift by a fraction of a pixel. The conformance test allows 0.5% of the pixels in each sample scene to differ by more than 32 levels, which the current samples stay well under. Gradients interpolate straight alpha, as the rules require; a test checks it. `clear` on a wrapped cairo_t also drops any clip the host had set, since `cairo_reset_clip` is the only way out of Cairo's clip; a draw handler that needs to keep the host's clip should fill a rectangle instead.
+
+Not supported yet: text. The plan is Pango, once the text API exists.
+
 ## Planned native backends
 
 The [roadmap](roadmap.md) has the order. The plan for each, so that the shape of the code is settled before it is written:
 
-- **Cairo**: hand-written FFI to `cairo.h`, with Pango for text, linked through `pkg-config`.
 - **Core Graphics**: Core Graphics and Core Text are C APIs, so the drawing works under both `nim c` and `nim objc`. The Objective-C parts (getting a `CGContextRef` from a view, `CALayer` and `NSImage` bridging) sit behind one small interface: `importobjc` under the Objective-C target, a `.m` shim compiled with `{.compile.}` under the C target.
 - **Direct2D**: COM calls through vtables from C, with DirectWrite for text and WIC for bitmaps.
 - **WebGL2**: shapes go through a shared GPU tessellation layer (flattened outlines to triangles, stencil-then-cover fills, batching), antialiasing through a multisampled renderbuffer, text through Canvas 2D on an `OffscreenCanvas`. The tessellation layer is meant to be reusable by a WebGPU backend.
