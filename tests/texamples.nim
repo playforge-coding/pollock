@@ -4,7 +4,7 @@
 ## simulations), so this checks that they draw without failing, that they
 ## move, and that they react to the pointer.
 
-import std/[math, unittest]
+import std/[math, strutils, unittest]
 import pollock/[recording, testing, backends/cpu, backends/svg]
 import scenes
 
@@ -68,7 +68,8 @@ suite "example scenes":
       var svg = newSvgContext(sceneWidth, sceneHeight)
       s.render(svg)
       check svg.finish().ok
-      check svg.toSvg().len > 1000
+      # Something was drawn. A length threshold would fail a simple scene.
+      check "<path " in svg.toSvg()
 
       # Every save is matched by a restore.
       var rec = newRecordingContext()
