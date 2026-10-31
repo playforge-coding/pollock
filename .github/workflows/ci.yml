@@ -2,12 +2,20 @@ name: CI
 
 # Builds and tests on every platform the pure-Nim backends run on, under the
 # C, C++ and JavaScript targets, tests the Cairo backend where Cairo can be
-# installed, and checks formatting.
+# installed, and checks formatting. Skips changes that only touch the docs.
 
 on:
   push:
     branches: [main]
+    paths-ignore: &paths-ignore
+      - "docs/**"
+      - "**.md"
+      - "zensical.toml"
+      - "LICENSE"
+      - ".github/workflows/docs.yml"
+      - ".github/workflows/pages.yml"
   pull_request:
+    paths-ignore: *paths-ignore
   workflow_dispatch:
 
 permissions:
@@ -28,10 +36,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: jiro4989/setup-nim-action@v2.3.1
+      # Installs only Nim, at the version in mise.toml. The plugin downloads a
+      # prebuilt release (a nightly build of the release on macOS), so nothing
+      # is compiled and no extra tools like nimgrep or nimsuggest get built.
+      # mise 2026.10.16 and later panic on Windows while unpacking the Nim
+      # zip, so mise stays at 2026.10.15 until that is fixed. The plugin looks
+      # up the macOS nightly through the GitHub API with GITHUB_TOKEN (the
+      # action only sets MISE_GITHUB_TOKEN), and without it a rate-limited
+      # lookup falls back to building Nim from source.
+      - uses: jdx/mise-action@v5.2.4
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         with:
-          nim-version: "2.4.0"
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: "2026.10.15"
+          plugins: nim https://github.com/elijahr/vfox-nim
+          install_args: nim
 
       - uses: actions/setup-node@v6
         with:
@@ -80,14 +99,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Installs only nph. The Nim plugin is registered so mise.toml parses,
+      # but Nim itself isn't needed to check formatting.
       - uses: jdx/mise-action@v5.2.4
         with:
-          install: false
+          version: "2026.10.15"
+          plugins: nim https://github.com/elijahr/vfox-nim
+          install_args: github:arnetheduck/nph
 
-      - name: Install the toolchain
-        run: |
-          mise plugin install nim https://github.com/elijahr/vfox-nim
-          mise install
-
+      # Runs nph from PATH rather than through `mise exec`, which would
+      # install the missing Nim first.
       - name: Check formatting
-        run: mise exec -- nph --check src tests tools examples
+        run: nph --check src tests tools examples

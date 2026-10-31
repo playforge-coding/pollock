@@ -66,6 +66,6 @@ Update the docs with the code. The Docs workflow runs the strict build on pull r
 
 ## Continuous integration
 
-- **CI** (`ci.yml`): runs `nimble test`, `nimble testcpp`, `nimble testjs` and `nimble samples` on Linux, macOS and Windows, builds the example window there (without running it, so SDL3 itself isn't needed), installs Cairo and runs `nimble testcairo` on Linux and macOS, uploads the rendered samples as artifacts, and checks formatting with `nph --check`.
+- **CI** (`ci.yml`): runs `nimble test`, `nimble testcpp`, `nimble testjs` and `nimble samples` on Linux, macOS and Windows, builds the example window there (without running it, so SDL3 itself isn't needed), installs Cairo and runs `nimble testcairo` on Linux and macOS, uploads the rendered samples as artifacts, and checks formatting with `nph --check`. It gets Nim and nph from mise at the versions in `mise.toml`, each job installing only the one it uses, and skips pushes and pull requests that only change the docs, Markdown files or the license.
 - **Docs** (`docs.yml`): builds the docs strictly when they change.
 - **Pages** (`pages.yml`): deploys the docs to GitHub Pages from `main`.
