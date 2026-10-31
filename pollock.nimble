@@ -20,7 +20,7 @@ task testjs, "Run the tests under the JavaScript target with Node":
     if name.startsWith("t") and name.endsWith(".nim"):
       exec "nim js -r -d:nodejs --hints:off --outdir:tests/jsout " & path
 
-task samples, "Render the sample scenes with every backend into out/":
+task samples, "Render the sample scenes with the CPU and SVG backends into out/":
   exec "nim r -d:release --hints:off tools/rendersamples.nim out"
 
 task goldens, "Rewrite the golden files in tests/golden from the current output":

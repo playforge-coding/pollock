@@ -3,7 +3,9 @@
 ##
 ## Transforms go on each element as a `matrix(...)` attribute. Clips become
 ## `<clipPath>` definitions referenced from a `<g>` that stays open until the
-## matching `restore`. Gradients go in `<defs>` with `userSpaceOnUse`
+## matching `restore`; `clear` closes the open groups around its rectangle and
+## reopens them, so it ignores the clip as the contract says. Gradients go in
+## `<defs>` with `userSpaceOnUse`
 ## coordinates, which SVG resolves in the referencing element's own space,
 ## so they line up with the element's transform. Images are embedded as PNG
 ## data URIs.
@@ -16,7 +18,7 @@ export context
 type
   SvgState = object
     transform: Affine
-    groups: int ## `<g>` elements open at this level.
+    clips: seq[string] ## Ids of the open `<g clip-path>` groups, outermost first.
 
   SvgContext* = object
     width*, height*: float64
@@ -30,10 +32,11 @@ proc newSvgContext*(width, height: float64): SvgContext =
   SvgContext(width: width, height: height, state: SvgState(transform: affineIdentity))
 
 func fmt(x: float64): string =
-  ## Short decimal: integers without a point, otherwise about seven
-  ## significant digits and never fewer than three places. Small values keep
-  ## their precision, which matters for transform coefficients: a scale of
-  ## 0.0004 must not round to 0.
+  ## Short decimal: integers without a point, otherwise rounded to about
+  ## seven significant digits (but never more coarsely than to three decimal
+  ## places), with trailing zeros removed, so 1.2 stays `1.2`. Small values
+  ## keep their precision, which matters for transform coefficients: a scale
+  ## of 0.0004 must not round to 0.
   if abs(x) < 1e-12:
     return "0"
   if x == round(x) and abs(x) < 1e15:
@@ -115,12 +118,19 @@ proc paintAttrs(ctx: var SvgContext, paint: Paint, attr: string): string =
       stopsMarkup(paint.radialStops) & "</radialGradient>"
     result = " " & attr & "=\"url(#" & id & ")\""
 
+proc openClip(ctx: var SvgContext, id: string) =
+  ctx.body.add "<g clip-path=\"url(#" & id & ")\">"
+
 proc clear*(ctx: var SvgContext, color: Color) =
-  ## Paints the whole picture. Inside an open clip the SVG rectangle is still
-  ## clipped; the contract's "ignores the clip" holds only at the top level.
+  ## Paints the whole picture, ignoring the clip: the open clip groups are
+  ## closed around the rectangle and reopened after it.
   let attrs = ctx.paintAttrs(solid(color), "fill")
+  for _ in ctx.state.clips:
+    ctx.body.add "</g>"
   ctx.body.add "<rect width=\"" & fmt(ctx.width) & "\" height=\"" & fmt(ctx.height) &
     "\"" & attrs & "/>"
+  for id in ctx.state.clips:
+    ctx.openClip(id)
 
 proc fillPath*(ctx: var SvgContext, path: BezPath, paint: Paint, rule: FillRule) =
   var el = "<path d=\"" & pathData(path) & "\"" & ctx.paintAttrs(paint, "fill")
@@ -174,8 +184,8 @@ proc clipPath*(ctx: var SvgContext, path: BezPath, rule: FillRule) =
   inner.add transformAttr(ctx.state.transform)
   inner.add "/>"
   ctx.defs.add "<clipPath id=\"" & id & "\">" & inner & "</clipPath>"
-  ctx.body.add "<g clip-path=\"url(#" & id & ")\">"
-  inc ctx.state.groups
+  ctx.openClip(id)
+  ctx.state.clips.add id
 
 proc save*(ctx: var SvgContext) =
   ctx.stack.add ctx.state
@@ -184,7 +194,7 @@ proc restore*(ctx: var SvgContext) =
   if ctx.stack.len == 0:
     return
   let prev = ctx.stack.pop()
-  for _ in prev.groups ..< ctx.state.groups:
+  for _ in prev.clips.len ..< ctx.state.clips.len:
     ctx.body.add "</g>"
   ctx.state = prev
 
@@ -224,7 +234,7 @@ proc toSvg*(ctx: SvgContext): string =
     result.add "  </defs>\n"
   for el in ctx.body:
     result.add "  " & el & "\n"
-  for _ in 0 ..< ctx.state.groups:
+  for _ in ctx.state.clips:
     result.add "  </g>\n"
   result.add "</svg>\n"
 

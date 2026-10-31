@@ -1,4 +1,4 @@
-## Renders every sample scene with every backend into a directory:
+## Renders every sample scene with the CPU and SVG backends into a directory:
 ## `nim r tools/rendersamples.nim out`.
 
 import std/[os, strformat]

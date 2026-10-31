@@ -17,7 +17,7 @@ Nimble ships with Nim. The package manifest is `pollock.nimble` at the root; `co
 | --- | --- |
 | `nimble test` | Runs every `tests/t*.nim` under the C target. |
 | `nimble testjs` | Runs the same tests under the JavaScript target with Node. |
-| `nimble samples` | Renders the sample scenes with every backend into `out/`. |
+| `nimble samples` | Renders the sample scenes with the CPU and SVG backends into `out/`. |
 | `nimble goldens` | Rewrites the golden files in `tests/golden/` from the current output. |
 | `nph src tests tools` | Formats the code. Run it before committing. |
 | `nim check src/pollock/backends/cpu.nim` | Type-checks one file quickly. |
@@ -31,7 +31,7 @@ One `t*.nim` per area in `tests/`, using `std/unittest`:
 - `tpng`: the PNG codec, including a zlib stream made by Python's `zlib` to exercise dynamic Huffman decoding.
 - `tsvg`: the SVG writer's output.
 - `tcpu`: the rasterizer, with exact pixel checks for aligned shapes, half-pixel coverage, compositing, fill rules, clips, transforms, strokes, geometry outside the target, gradients and images.
-- `tsamples`: renders every sample scene with every backend and compares with the goldens.
+- `tsamples`: renders every sample scene with the CPU and SVG backends and compares with the goldens.
 
 Add a test with every behavior change. Tests that touch files skip themselves under JavaScript with `when not defined(js)`.
 

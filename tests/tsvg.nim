@@ -120,6 +120,24 @@ suite "svg backend":
       "  </g>\n" & "  " & square & "/>\n" & "</svg>\n"
     check doc.endsWith("  </defs>\n" & body)
 
+  test "clear escapes open clips and the transform":
+    var ctx = newSvgContext(10, 10)
+    ctx.withClip(circle(5, 5, 5)):
+      ctx.withTransform(scale(2)):
+        ctx.withClip(rect(0, 0, 2, 2)):
+          ctx.clear(white)
+          ctx.fill(rect(0, 0, 1, 1), black)
+    let doc = ctx.toSvg
+    let square = "<path d=\"M0 0 L1 0 L1 1 L0 1 Z\" fill=\"#000000\""
+    # The rectangle sits outside both groups, and the fill after it is back
+    # inside them.
+    let body =
+      "  <g clip-path=\"url(#c1)\">\n" & "  <g clip-path=\"url(#c2)\">\n" & "  </g>\n" &
+      "  </g>\n" & "  <rect width=\"10\" height=\"10\" fill=\"#ffffff\"/>\n" &
+      "  <g clip-path=\"url(#c1)\">\n" & "  <g clip-path=\"url(#c2)\">\n" & "  " & square &
+      " transform=\"matrix(2 0 0 2 0 0)\"/>\n" & "  </g>\n" & "  </g>\n" & "</svg>\n"
+    check doc.endsWith("  </defs>\n" & body)
+
   test "unbalanced clips are closed in the output":
     var ctx = newSvgContext(10, 10)
     ctx.clip(circle(5, 5, 5))

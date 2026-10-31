@@ -51,7 +51,7 @@ A `Shader` is a paint resolved for one fill: solid color, linear or radial gradi
 
 ## The SVG writer
 
-Each primitive becomes one element with the current transform as a `matrix(...)` attribute, so there is no transform state to track in the output and the coordinates in the document are the user's own. Clips are the exception: they open a `<g clip-path>` and the save stack remembers how many groups each level opened, so `restore` closes the right number.
+Each primitive becomes one element with the current transform as a `matrix(...)` attribute, so there is no transform state to track in the output and the coordinates in the document are the user's own. Clips are the exception: they open a `<g clip-path>`, and the state keeps the ids of the open groups. `restore` closes the groups opened since the matching `save`, and `clear` closes all of them around its rectangle and reopens them after, since an SVG element can't escape a clip on an enclosing group any other way.
 
 ## PNG
 

@@ -27,7 +27,7 @@ proc renderSvg(index: int): string =
   ctx.toSvg()
 
 suite "samples":
-  test "every sample renders on every backend":
+  test "every sample renders on the CPU and SVG backends":
     for i in 0 ..< sampleNames.len:
       let img = renderCpu(i)
       check img.width == sampleWidth

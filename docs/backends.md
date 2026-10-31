@@ -44,9 +44,9 @@ var ctx = newSvgContext(width, height)   # in user units
 writeFile("out.svg", ctx.toSvg())
 ```
 
-Each `fillPath` and `strokePath` becomes a `<path>` with the transform as a `matrix(...)` attribute, so the output is readable and the transforms are exact. Gradients go into `<defs>` with `gradientUnits="userSpaceOnUse"`, which SVG resolves in the referencing element's own coordinate system, including its transform attribute, so they line up with the element. A clip becomes a `<clipPath>` definition and a `<g clip-path>` that stays open until the matching `restore`; `toSvg` closes any group that is still open. Images are embedded as PNG data URIs.
+Each `fillPath` and `strokePath` becomes a `<path>` with the transform as a `matrix(...)` attribute, so the output is readable and the transforms are exact. Gradients go into `<defs>` with `gradientUnits="userSpaceOnUse"`, which SVG resolves in the referencing element's own coordinate system, including its transform attribute, so they line up with the element. A clip becomes a `<clipPath>` definition and a `<g clip-path>` that stays open until the matching `restore`; `toSvg` closes any group that is still open. `clear` closes the open groups around its rectangle and reopens them after it, so like on every backend it paints the whole picture whatever the clip. Images are embedded as PNG data URIs.
 
-Known limits: `clear` inside an open clip is clipped, since it is an SVG `<rect>` like any other element (at the top level it behaves as the contract says). Numbers are written with about seven significant digits and never fewer than three decimals, so transform coefficients like a scale of 0.0004 keep their value. A miter limit below 1, which SVG would ignore, is written as a bevel join, matching what such a limit means.
+Numbers are rounded to about seven significant digits, never more coarsely than to three decimal places, and trailing zeros are dropped (`1.2` stays `1.2`). That keeps transform coefficients like a scale of 0.0004 intact. A miter limit below 1, which SVG would ignore, is written as a bevel join, matching what such a limit means.
 
 ## Recording
 
