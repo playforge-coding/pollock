@@ -2,22 +2,21 @@
 
 ## Overview
 
-pollock is an abstract 2D graphics API for Nim, modeled on [linebender/piet](https://github.com/linebender/piet). Code draws against one API (paths, fills, strokes, gradients, clips, transforms, images and text) and a backend turns that into calls to a native renderer. License: BSD-3-Clause. The toolchain is pinned in `mise.toml` (Nim 2.4.0), and Nimble, which ships with Nim, handles the build, tasks and dependencies.
+pollock is an abstract 2D graphics API for Nim, modeled on [linebender/piet](https://github.com/linebender/piet). Code draws against one API (paths, fills, strokes, gradients, clips, transforms and images; text is planned) and a backend turns that into calls to a renderer. License: BSD-3-Clause. The toolchain is pinned in `mise.toml` (Nim 2.4.0, nph 0.7.0), and Nimble, which ships with Nim, handles the build, tasks and dependencies. There are no dependencies beyond the standard library.
 
-Status: nothing is built yet. This section describes the design the code is meant to follow. As modules land, replace the plan with what the code actually does, and when the code and this file disagree, fix whichever one is wrong in the same change.
+Backends:
 
-Backends shipped in this repository:
-
-| Backend | Platform | Nim target | Native API |
+| Backend | Module | Target | Status |
 | --- | --- | --- | --- |
-| `cairo` | Linux, BSDs (works anywhere Cairo is installed) | `c` | Cairo, with Pango for text |
-| `coregraphics` | macOS | `objc`, and `c` through a wrapper | Core Graphics, Core Text |
-| `direct2d` | Windows | `c` | Direct2D, DirectWrite, WIC |
-| `webgl2` | Browsers | `js` | WebGL2, with Canvas 2D for text rasterization |
-| `svg` | Any | `c`, `objc`, `js` | None, writes SVG documents in pure Nim |
-| `cpu` | Any | `c`, `objc`, `js` | None, a software rasterizer in pure Nim |
+| `cpu` | `pollock/backends/cpu` | `c`, `objc`, `js` | done, no text. The reference renderer. |
+| `svg` | `pollock/backends/svg` | `c`, `objc`, `js` | done, no text |
+| `recording` | `pollock/recording` | any | done; records the calls, for tests |
+| `cairo` | `pollock/backends/cairo` | `c` | planned: Cairo with Pango for text |
+| `coregraphics` | `pollock/backends/coregraphics` | `objc`, and `c` through a wrapper | planned: Core Graphics, Core Text |
+| `direct2d` | `pollock/backends/direct2d` | `c` | planned: Direct2D, DirectWrite, WIC |
+| `webgl2` | `pollock/backends/webgl2` | `js` | planned: WebGL2, Canvas 2D for text |
 
-The backend set is open. A backend is any type that satisfies the `RenderContext` concept, so a third-party package (a WebGPU backend, a software rasterizer) plugs in without changes to pollock itself.
+The backend set is open. A backend is any type that satisfies the `RenderContext` concept, so a third-party package (a WebGPU backend, say) plugs in without changes to pollock itself.
 
 ### Layers
 
@@ -26,70 +25,67 @@ flowchart TD
   app[Application code] --> hl[pollock/draw: high-level API]
   app --> ctx
   hl --> ctx[pollock/context: RenderContext concept]
-  ctx --> geo[pollock/geometry, color, paint, stroke, text, image]
-  ctx -.implemented by.-> cairo[backends/cairo]
-  ctx -.implemented by.-> cg[backends/coregraphics]
-  ctx -.implemented by.-> d2d[backends/direct2d]
-  ctx -.implemented by.-> gl[backends/webgl2]
-  ctx -.implemented by.-> svg[backends/svg]
+  ctx --> geo[pollock/geometry, color, paint, stroke, image]
   ctx -.implemented by.-> cpu[backends/cpu]
+  ctx -.implemented by.-> svg[backends/svg]
+  ctx -.implemented by.-> rec[recording]
+  ctx -.implemented by.-> native[planned native backends]
   ctx -.implemented by.-> ext[third-party backends]
-  gl --> gpu[pollock/gpu: triangulation and batching]
-  ext -.may use.-> gpu
-  gpu --> geo
   cpu --> geo
+  cpu --> png[pollock/png]
+  svg --> png
 ```
 
-- Value types (`geometry`, `color`, `paint`, `stroke`) are pure Nim with no backend knowledge. Geometry is the equivalent of piet's kurbo: `Point`, `Vec2`, `Size`, `Rect`, `RoundedRect`, `Circle`, `Ellipse`, `Line`, `Arc`, `Affine` and `BezPath`, all in `float64`. A `Shape` is anything with a `pathElements(tolerance)` iterator; backends check for concrete shape types with `when shape is Rect` and the like to use native fast paths (`CGContextFillRect`, `FillRoundedRectangle`). Geometry also owns curve flattening and stroke expansion (turning a stroked path into the outline to fill), since the CPU backend and `pollock/gpu` both need them.
-- `context.nim` holds the `RenderContext` concept: the small set of primitives every backend implements. It is the contract, and it stays small. Anything that can be expressed with the primitives belongs in the high-level API instead.
-- `draw.nim` is the high-level API, written once, generic over any `RenderContext`. Convenience shapes and builders, `withSave`/`withTransform`/`withClip` templates, a path DSL, and helpers that take a plain `Color` where the primitive wants a brush. It never calls a backend directly.
-- `gpu/` is shared code for backends that rasterize on the GPU themselves: triangulating the flattened outlines from geometry, stencil-then-cover fills for nonzero and even-odd rules, and batching into vertex buffers. WebGL2 is its first user. Keep it free of WebGL types so a WebGPU backend can reuse it.
-- `testing.nim` and `samples/` are for backend authors as much as for us: a set of numbered sample scenes every backend renders, plus helpers to compare the output against reference images.
-- `pollock.nim` re-exports the core API and the platform's default backend, the way `piet-common` does. The default is Core Graphics on macOS, Direct2D on Windows, WebGL2 under `js`, and Cairo elsewhere. `-d:pollockBackend=<module>` overrides it with any importable module path, including a third-party one; a macro turns the define into the `import`.
+Modules in `src/`:
+
+- `pollock.nim`: the entry point. Re-exports `draw` and `png` and imports one backend, the one named by the `pollockBackend` define (default `pollock/backends/cpu`; any module path works, including one from another package). A macro turns the define into the `import` and `export`.
+- `pollock/geometry.nim`: `Point`, `Vec2`, `Size`, `Rect`, `RoundedRect`, `Circle`, `Ellipse`, `Line`, `Affine`, `PathEl`, `BezPath`, `Polyline`, all in `float64`, and the `Shape` concept (`toPath` and `boundingBox`). Also flattening (`flatten`, Wang's formula for the segment count; a subpath that is only a `moveTo` is dropped, a zero-length one is kept so strokes draw it as a dot), `signedArea`, `area` and `polygonPath`. `boundingBox` of a path is the box around the control points, not the exact curve.
+- `pollock/color.nim`: `Color` (sRGB, straight alpha, 0..1), `Rgba8`, hex parsing and formatting, premultiplication, `lerp`, named constants.
+- `pollock/paint.nim`: `Paint` (solid, linear gradient, radial gradient), `GradientStop`, `Extend`, `colorAt` and `applyExtend` for evaluating gradients. `Paint` is a case object, so it has a hand-written `==`; so does `PathEl`.
+- `pollock/stroke.nim`: `StrokeStyle` (width, caps, joins, miter limit, dashes) and stroke expansion. `dash` splits polylines by a pattern (zero-length on entries become two-point dashes that stroke as dots, zero-length gaps keep the line whole); `strokeOutline` turns a path into a union of pieces (one quad per segment, join and cap pieces) that all wind the same way, so a nonzero fill gives the stroke. Backends with native stroking pass the style through; the CPU backend fills the outline.
+- `pollock/image.nim`: `ImageData` (`ifGray8`, `ifRgb8`, `ifRgba8`, `ifRgba8Premul`), pixel get and set as `Color`, `convert`.
+- `pollock/context.nim`: the `RenderContext` concept with its ten primitives, `FillRule`, `Interpolation`, `RenderResult`, and the contract rules in its module comment. Re-exports the value-type modules so a backend imports one thing.
+- `pollock/draw.nim`: the high-level API, generic over `C: RenderContext`: `fill`, `stroke`, `clip` for any `Shape`, with `Color` overloads; `translate`, `scale`, `rotate`, `rotateAbout`; `drawImage` helpers; the templates `withSave`, `withTransform`, `withClip`. The `drawImage` helpers need `mixin drawImage` because they share a name with the primitive.
+- `pollock/recording.nim`: `RecordingContext`, which stores `Command`s.
+- `pollock/png.nim`: a PNG codec with no dependencies. The encoder writes stored deflate blocks; the decoder has a full inflate (stored, fixed and dynamic Huffman) and handles 8-bit gray, RGB, palette, gray+alpha and RGBA without interlacing. Malformed input raises `PngError`, never a defect: the IHDR length and dimensions are checked, and `inflate` takes a `maxOutput` that the decoder sets to the size the header implies, so a small file can't expand into gigabytes. `writePng` and `readPng` exist off the JS target.
+- `pollock/samples.nim`: the sample scenes (`sampleNames`, `drawSample`), plus `checkerboard`, `starPath` and `pentagramPath` (self-intersecting, for fill-rule tests).
+- `pollock/testing.nim`: `compareImages` for golden tests and for backend authors.
+- `pollock/backends/cpu.nim`: `CpuContext`. Premultiplied RGBA `float32` pixels. Paths are transformed to device space, flattened, and accumulated as exact signed-area coverage (after font-rs) in a buffer with `width + 2` cells per row; edges are split at the left and right borders and the outside parts become vertical edges on the border so their winding still counts. Only the columns the shape's bounds touch are cleared and scanned. A `Shader` is a paint resolved for one fill (solid, gradient or image with the inverse transform); a linear gradient with no length or a radial one with no radius becomes a solid of the last stop, as SVG specifies. Clips are immutable coverage masks shared through the save stack. Strokes are expanded in user space with the tolerance divided by `Affine.maxScale` (the largest stretch, so non-uniform transforms stay smooth), then filled. `toImage` and `pixel` read the result back.
+- `pollock/backends/svg.nim`: `SvgContext`. One element per primitive with the transform as a `matrix(...)` attribute; gradients in `<defs>` with `userSpaceOnUse`; a clip opens a `<g clip-path>`, and the state keeps the ids of the open groups so `restore` closes the ones its level opened and `clear` can close them all around its rectangle and reopen them (so `clear` ignores the clip, as the contract says); images as PNG data URIs. Numbers are rounded to about seven significant digits, never more coarsely than to three decimal places, with trailing zeros removed, so small transform coefficients survive. A miter limit below 1 is written as a bevel join, since SVG ignores it. `toSvg` returns the document.
 
 ### The contract
 
-These rules decide what every backend has to agree on. Changing one is an API change, so update the docs and every backend together.
+These rules decide what every backend has to agree on. Changing one is an API change, so update `docs/context.md` and every backend together.
 
-- Coordinates: origin at the top left, y pointing down, in logical units. A context carries a device scale factor for HiDPI. Core Graphics flips y by default, so its backend applies the flip once when the context is created and never leaks it.
-- Color: sRGB. `Color` is straight alpha; images declare their pixel format (RGBA8 straight, RGBA8 premultiplied, and so on) and backends convert. Gradients interpolate in sRGB, since that is what all the native renderers do.
-- Device resources: brushes, images and text layouts belong to the backend, because Direct2D brushes and bitmaps are bound to a render target and WebGL textures are bound to a GL context. Each backend declares its own `Brush`, `Image`, `Text` and `TextLayout` types and creates them through the context. The high-level API accepts a backend-independent `Paint` value (a color or a gradient description) and lets the backend cache the device brush for it.
-- Errors: drawing calls do not raise (`{.raises: [].}`). A backend records the first failure and reports it from `finish`, the same way Cairo's sticky status works. Losing the device (`D2DERR_RECREATE_TARGET`, a lost WebGL context) is one of those errors, and the caller recreates the context.
-- State: `save` and `restore` cover the transform and the clip. Brushes are passed per call, not stored as state.
-- Text: a `Text` factory looks up fonts and builds `TextLayout`s with ranged attributes (family, size, weight, style, color, underline). A layout reports its size, line metrics and hit testing. Text is the least portable part, so its API grows only when every backend can implement the addition.
+- Coordinates: origin at the top left, y pointing down, in logical units. Positive rotation is clockwise on screen. Core Graphics flips y by default, so its backend will apply the flip once when the context is created and never leak it.
+- Color: sRGB. `Color` is straight alpha; images declare their pixel format and backends convert. Gradients interpolate in sRGB with straight alpha, since that is what all the native renderers do.
+- Paints are values. A backend may build device resources (Direct2D brushes, WebGL textures) from them and cache those.
+- Errors: drawing calls do not raise. A backend records the first failure and reports it from `finish`, the same way Cairo's sticky status works. Losing the device is one of those errors, and the caller recreates the context.
+- State: `save` and `restore` cover the transform and the clip. Paints are passed per call, not stored as state.
+- `clear` paints the whole target and ignores the transform and the clip.
+- The primitives are named `fillPath`, `strokePath` and `clipPath`, and the generic helpers in `draw.nim` are `fill`, `stroke` and `clip`, so the concept never matches the helpers. Keep it that way when adding primitives: a primitive and a helper must not share a name unless the helper uses `mixin`.
+- Text: planned. A `Text` factory will build `TextLayout`s with ranged attributes, and the API grows only when every backend can implement the addition.
 
 ### Targets and platform code
 
-- Everything outside `backends/` must compile under `nim c`, `nim objc` and `nim js`, and so must the `svg` and `cpu` backends. That rules out `ptr`, `addr`, `cast` of memory, `int64` arithmetic that depends on wrapping, and anything from `std/os` that JS lacks. Pixel buffers are `seq[byte]` in the core; the WebGL2 backend converts them to typed arrays.
-- Pick code by target with `when defined(js)`, `when defined(objc)`, `when defined(macosx)`, `when defined(windows)`. Keep those branches inside backends and the few core modules that need them, not spread through shared code.
-- `cairo`: hand-written FFI to `cairo.h`, `pango.h` and `pangocairo.h`, linked through `pkg-config` in a `{.passl.}`. Bind only what the backend calls.
-- `coregraphics`: Core Graphics and Core Text are C APIs, so the drawing itself is plain `importc` and works under both targets. The Objective-C parts (getting a `CGContextRef` from an `NSView` or `NSGraphicsContext`, `CALayer` integration, `NSImage` bridging) live behind one small interface. Under `nim objc` it uses `importobjc` and `{.emit.}` directly; under `nim c` the same interface is a `.m` shim compiled with `{.compile.}` that exposes plain C functions. Both builds go through the same Nim procs, and tests run under both targets.
-- `direct2d`: COM interfaces for `ID2D1*` and `IDWrite*` called through their vtables from C. winim covers base COM types and WIC (`winim/inc/wincodec`), but has no Direct2D or DirectWrite bindings, so those are written here. Only call what the backend uses.
-- `webgl2`: bindings to `WebGL2RenderingContext` through `importjs`, written here. Shapes go through `pollock/gpu`, antialiasing through a multisampled renderbuffer resolved with `blitFramebuffer`, and text is laid out with Canvas 2D `measureText` and rasterized into a texture on an `OffscreenCanvas`.
-- `svg`: builds an SVG document as a string, with no dependencies. Gradients, clips and images go into `<defs>` and are referenced by id. Text is written as `<text>` elements, so layout metrics come from a simple built-in measurer and are approximate; the docs say so.
-- `cpu`: a software rasterizer that renders into an RGBA8 premultiplied `seq[byte]`. It fills the flattened outlines from geometry with exact-area coverage accumulation (the approach of font rasterizers like font-rs), applies paints and clips per span, and composites with source-over. It is the reference backend: it runs everywhere, so samples and conformance tests always have one renderer that works on the CI machine at hand. Text needs a font parser and glyph outlines, so it comes after the shape and image work.
-- pollock does not open windows or run event loops. Each backend wraps a native context the caller already has (`cairo_t*`, `CGContextRef`, `ID2D1RenderTarget`, an `HTMLCanvasElement`) and also offers an offscreen bitmap target that can be read back to pixels or written to PNG.
-
-### Planned layout
-
-- `src/pollock.nim`: the entry point. Core re-exports and default backend selection.
-- `src/pollock/geometry.nim` (a directory once it outgrows one file), `color.nim`, `paint.nim`, `stroke.nim`, `image.nim`, `text.nim`: value types.
-- `src/pollock/context.nim`: the `RenderContext` concept.
-- `src/pollock/draw.nim`: the high-level API.
-- `src/pollock/dyn.nim`: an optional type-erased context (a table of closures built from any `RenderContext`) for code that has to pick a backend at runtime. Static dispatch through the concept is the default.
-- `src/pollock/gpu/`: shared GPU tessellation.
-- `src/pollock/recording.nim`: a backend that records calls into a list. Tests use it to check the high-level API without a native renderer.
-- `src/pollock/backends/<name>.nim`, with FFI and shims in `src/pollock/backends/<name>/`.
-- `src/pollock/samples/` and `src/pollock/testing.nim`: the sample scenes and the conformance helpers.
+- Everything in `src/` must compile under `nim c`, `nim objc` and `nim js`, and the tests run under `c` and `js` (`nimble testjs`). That rules out `ptr`, `addr` and `cast` of memory in the core and the pure-Nim backends. Pixel buffers are `seq[uint8]` and `seq[float32]`. File I/O goes behind `when not defined(js)`.
+- The JS backend evaluates a `case` selector once per branch. Bind a selector with side effects to a `let` first (`png.nim` does this for the deflate block type). Unsigned arithmetic and `shl`/`shr` on `uint32` behave the same on both targets. `int` is 32 bits on JS for range and overflow checks, so `int(x)` of a `uint32` above 2^31 - 1 raises there: check the unsigned value first, and size large products in `float64`.
+- Pick code by target with `when defined(js)`, `when defined(objc)`, `when defined(macosx)`, `when defined(windows)`. Keep those branches inside backends and the few core modules that need them.
+- Planned native backends, so the shape is settled before they are written:
+  - `cairo`: hand-written FFI to `cairo.h`, `pango.h` and `pangocairo.h`, linked through `pkg-config` in a `{.passl.}`. Bind only what the backend calls.
+  - `coregraphics`: Core Graphics and Core Text are C APIs, so the drawing is plain `importc` and works under both targets. The Objective-C parts (getting a `CGContextRef` from an `NSView` or `NSGraphicsContext`, `CALayer` integration, `NSImage` bridging) live behind one small interface: `importobjc` and `{.emit.}` under `nim objc`, a `.m` shim compiled with `{.compile.}` under `nim c`. Both builds go through the same Nim procs, and tests run under both targets.
+  - `direct2d`: COM interfaces for `ID2D1*` and `IDWrite*` called through their vtables from C. winim covers base COM types and WIC but has no Direct2D or DirectWrite bindings, so those are written here.
+  - `webgl2`: bindings to `WebGL2RenderingContext` through `importjs`. Shapes go through a shared `pollock/gpu` layer (triangulating flattened outlines, stencil-then-cover fills, batching) kept free of WebGL types so a WebGPU backend can reuse it; antialiasing through a multisampled renderbuffer resolved with `blitFramebuffer`; text laid out with Canvas 2D `measureText` and rasterized into a texture on an `OffscreenCanvas`.
+- pollock does not open windows or run event loops. Each backend wraps a native target the caller already has, or an offscreen one of its own.
 
 ## Building and testing
 
 - Nim comes from mise through the vfox-nim plugin. Register the plugin once with `mise plugin install nim https://github.com/elijahr/vfox-nim`, then run `mise install`. Do not install Nim another way (choosenim, Homebrew) alongside it.
-- Keep the package manifest in `pollock.nimble` at the root, so `nimble build` and `nimble test` are the main commands anyone needs to remember. Nimble's built-in `test` runs every `tests/t*.nim`; add a task only for a step it doesn't cover (running the tests under `js` and `objc`, rendering the samples). Pin dependencies in `nimble.lock` (`nimble lock`) and commit it.
-- Tests live in `tests/`, one `t*.nim` file per area, using `std/unittest`. Add a test with every behavior change. Core tests run under `c` and `js` (`nim js -d:nodejs -r`). Backend tests skip themselves with `when` on platforms where the backend can't run.
-- Rendering is checked with the samples: every backend renders each sample to a bitmap, and the test compares it with `tests/golden/<backend>/<sample>.png` within a tolerance, since antialiasing differs between renderers. The `cpu` backend must match its goldens exactly, since it is deterministic. The `svg` backend's goldens are `.svg` files compared as text. Regenerate a golden only on purpose, look at the new image, and say why in the commit.
-- Run `nim check` on a file for fast type errors without a full build. Backends for other platforms can be type-checked from any machine: `nim check --os:windows src/pollock/backends/direct2d.nim`, `nim check --os:linux src/pollock/backends/cairo.nim`, `nim js` for WebGL2. Do this whenever you touch a backend you can't run locally.
-- CI runs the tests on Linux (Cairo), macOS (Core Graphics under `c` and `objc`), Windows (Direct2D) and headless Chromium (WebGL2). The `svg` and `cpu` tests run on all of them.
+- Keep the package manifest in `pollock.nimble` at the root. `nimble test` runs every `tests/t*.nim` under the C target; the tasks there are `testjs` (the same under `nim js` with Node), `samples` (renders every scene with the CPU and SVG backends into `out/`, through `tools/rendersamples.nim`) and `goldens` (rewrites `tests/golden/`). Add a task only for a step those don't cover. When a dependency ever appears, pin it in `nimble.lock` (`nimble lock`) and commit it.
+- Tests live in `tests/`, one `t*.nim` file per area, using `std/unittest`. `tests/config.nims` puts `src/` on the path. Add a test with every behavior change. Tests that touch files skip themselves under JS with `when not defined(js)`.
+- Rendering is checked with the samples in `tsamples.nim`: the CPU and SVG backends render each scene and the test compares the output with `tests/golden/cpu/<name>.png` (exact, since the CPU backend is deterministic) and `tests/golden/svg/<name>.svg` (as text; `.gitattributes` keeps them LF on Windows checkouts). Regenerate a golden only on purpose with `nimble goldens`, look at the new files, and say why in the commit. When adding a scene, add it to `sampleNames` and `drawSample` and commit its goldens; a normal test run never writes goldens, so a missing one fails.
+- Run `nim check` on a file for fast type errors without a full build. Backends for other platforms can be type-checked from any machine: `nim check --os:windows ...`, `nim check --os:linux ...`, `nim js` for WebGL2. Do this whenever you touch a backend you can't run locally.
+- CI (`.github/workflows/ci.yml`) runs `nimble test`, `nimble testjs` and `nimble samples` on Linux, macOS and Windows and checks `nph --check`. Native backends will add platform jobs (Linux for Cairo, macOS for Core Graphics under `c` and `objc`, Windows for Direct2D, headless Chromium for WebGL2).
 - Compiler settings that apply to the whole project go in `config.nims` at the root, not in flags scattered across scripts.
 
 ## Searching the Codebase
@@ -107,30 +103,31 @@ If your harness has dedicated search or file tools that already wrap these, thos
 
 Always lint and format:
 
-- Format with [`nph`](https://github.com/arnetheduck/nph), not `nimpretty`. Run `nph src tests` before committing.
-- Build with `--styleCheck:error` (set it in `config.nims`) so identifiers keep one spelling across the codebase. Nim's style insensitivity is not an excuse for `fooBar` in one file and `foo_bar` in another. FFI names keep the C spelling through `importc: "cairo_fill"` while the Nim name follows Nim style.
+- Format with [`nph`](https://github.com/arnetheduck/nph), not `nimpretty`. Run `nph src tests tools` before committing; CI rejects unformatted code.
+- Build with `--styleCheck:error` (set in `config.nims`) so identifiers keep one spelling across the codebase. Nim's style insensitivity is not an excuse for `fooBar` in one file and `foo_bar` in another. FFI names keep the C spelling through `importc: "cairo_fill"` while the Nim name follows Nim style.
 - Treat compiler warnings and hints about unused imports or variables as things to fix, not noise.
 
 Use modern code practices:
 
-- Nim 2 defaults: ORC memory management, `strictDefs`, and `std/` prefixed imports (`import std/[math, options]`).
-- Prefer `func` for procs without side effects (all of geometry should be `func`), exception-tracked error handling with `{.raises: [].}` on the drawing primitives, and `distinct` types over bare primitives for things that should not mix.
+- Nim 2 defaults: ORC memory management, `strictDefs`, and `std/` prefixed imports (`import std/[math, strutils]`).
+- Prefer `func` for procs without side effects (all of geometry is `func`), exception-tracked error handling with `{.raises: [].}` where it matters, and `distinct` types over bare primitives for things that should not mix.
 - Native handles are owned by Nim objects with `=destroy` hooks (release the COM pointer, `cairo_destroy`, `CFRelease`), and `=copy` is disabled for them unless the handle is reference counted and the copy retains it.
-- Keep the concept small and generic code static. Reach for `dyn.nim` only where runtime choice is the point.
+- Keep the concept small and generic code static. A type-erased context is on the roadmap for code that has to pick a backend at runtime; static dispatch through the concept is the default.
+- Every backend ends with `static: doAssert X is RenderContext`, so a missing proc fails in the backend's own module.
 - Reach for the standard library before adding a dependency.
 
 ## Docs (IMPORTANT!!!)
 
 Always update the docs if necessary when changing or adding code. If the docs already contain outdated information, expand your scope to cover that info too. That includes this file: when the layout, build, backends or tooling change, update the overview and the build section here.
 
-The docs are a [Zensical](https://zensical.org) site: `zensical.toml` at the root, pages in `docs/`. Set it up with the first code. `zensical build --strict` checks it and writes `site/` (ignored by git), and `zensical serve` previews it. A Docs workflow runs the strict build on pull requests that touch the docs, and a Pages workflow publishes the site on every push to `main` that does. Planned pages:
+The docs are a [Zensical](https://zensical.org) site: `zensical.toml` at the root, pages in `docs/`. `uvx zensical build --strict` checks it and writes `site/` (ignored by git), and `uvx zensical serve` previews it. The Docs workflow runs the strict build on pull requests that touch the docs, and the Pages workflow publishes the site on every push to `main` that does. Pages:
 
 - `index.md`: what pollock is, with an example.
-- `getting-started.md`: installing, the system libraries each backend needs, a first drawing to a PNG and into a window.
-- `drawing.md`: the high-level API. Every exported proc and template in `draw.nim` gets an entry.
-- `context.md`: the `RenderContext` primitives and the contract rules above.
-- `backends.md`: one section per backend, covering how to wrap a native context, its quirks and what it doesn't support yet.
-- `writing-a-backend.md`: implementing the concept in a separate package, using `pollock/gpu`, and running the samples against it.
+- `getting-started.md`: installing, a first drawing to a PNG and to SVG, generic drawing code, choosing the default backend.
+- `drawing.md`: the high-level API. Every exported proc and template in `draw.nim` gets an entry, and the shapes, paints and stroke styles they take.
+- `context.md`: the `RenderContext` primitives and the contract rules above. Keep it in step with `context.nim`.
+- `backends.md`: one section per backend, covering how to make one, its quirks and what it doesn't support yet, and the plan for the native ones.
+- `writing-a-backend.md`: implementing the concept in a separate package, what pollock provides, running the samples against it.
 - `architecture.md` and `development.md`: for people working on pollock.
 - `roadmap.md`: what's done and what's planned.
 
@@ -138,7 +135,7 @@ Compile the examples you put in the docs before committing them.
 
 When a roadmap item is finished, check it off (`- [x]`) where it is. DO NOT move it into an earlier section like "Done: the MVP". The roadmap shows how each goal is progressing, so finished items stay with the section they belong to.
 
-The README is only an entry point: what pollock is, one example, installing, and links into the docs. Put details in the docs, not the README.
+The README is only an entry point: what pollock is, one example, building, and links into the docs. Put details in the docs, not the README.
 
 ## Diagrams as Mermaid, not ASCII art
 
@@ -148,7 +145,7 @@ Never draw a flow, pipeline or architecture picture out of characters in a code 
 
 PLEASE, PLEASE do not use a package that is old or deprecated. EVEN IF IT IS "INDUSTRY STANDARD" THAT DOES NOT MEAN IT IS GOOD!!! USE THE BEST PACKAGE AND LATEST VERSION LIKE A NORMAL PERSON WOULD!
 
-Check the package's repository for its latest release tag (and whether it is still maintained) before adding it to or bumping it in `pollock.nimble`. The Nimble package list (`nimble search <name>`) points to the repository. The same goes for native APIs: target current ones (Direct2D 1.1 device contexts, not the old `ID2D1HwndRenderTarget` path, if it fits; WebGL2, not WebGL1 fallbacks).
+Check the package's repository for its latest release tag (and whether it is still maintained) before adding it to or bumping it in `pollock.nimble`. The Nimble package list (`nimble search <name>`) points to the repository. The same goes for GitHub Actions in the workflows and for native APIs: target current ones (Direct2D 1.1 device contexts rather than the old `ID2D1HwndRenderTarget` path if it fits; WebGL2, not WebGL1 fallbacks).
 
 ## Keep things human
 
