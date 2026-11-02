@@ -11,7 +11,7 @@ let font = newFont(readFile("Inter-Regular.ttf"))
 let second = newFont(readFile("Family.ttc"), index = 1)
 ```
 
-Nothing is parsed up front. The engine reads the font the first time it is used and keeps what it parsed on the `Font`, along with the glyph drawings it makes, so make a font once and share it. On the JavaScript target, where there is no `readFile`, embed the file with `staticRead` and hand the string to `newFont`. A font the engine can't read makes `layout` raise `FontError`; drawing its glyphs draws nothing, since drawing calls never raise.
+Nothing is parsed up front. The engine reads the font the first time it is used and keeps what it parsed on the `Font`, along with the glyph drawings it makes, so make a font once and share it. On the JavaScript target, where there is no `readFile`, embed the file with `staticRead` and hand the string to `newFont`. A font the engine can't read makes `layout` raise `FontError`; drawing its glyphs draws nothing, since drawing calls never raise. That includes a corrupt or hostile file: the engine limits how much work one font or one glyph can take, so a font from an untrusted source can't crash or hang the program.
 
 pollock never looks for installed fonts. The application brings the files, and an engine that can find fonts (the native ones, when they exist) does so on its own terms.
 

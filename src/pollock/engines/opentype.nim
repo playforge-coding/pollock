@@ -25,32 +25,30 @@ type
 
   Bytes = seq[uint8]
 
-  Coverage = object # Glyph id to coverage index, or -1.
-    case ranged: bool
-    of false:
-      glyphs: Table[uint16, int]
-    of true:
-      starts, ends: seq[uint16]
-      firstIndex: seq[int]
+  Coverage = object ## A GPOS coverage table, searched in place.
+    format: int ## 1 for a list of glyphs, 2 for ranges.
+    at: int ## The list or the ranges.
+    count: int
 
-  ClassDef = object
-    case ranged: bool
-    of false:
-      startGlyph: int
-      classes: seq[int]
-    of true:
-      starts, ends: seq[uint16]
-      values: seq[int]
+  ClassDef = object ## A GPOS class definition, searched in place.
+    format: int ## 1 for a run of glyphs from `startGlyph`, 2 for ranges.
+    at: int ## The classes or the ranges.
+    count: int
+    startGlyph: int
 
-  PairLookup = object
-    coverage: Coverage
+  PairLookup = object ## A pair adjustment subtable, read in place.
+    coverage: Coverage ## The first glyphs it adjusts.
+    valueFormat: int ## The first glyph's value format, which holds the x advance.
+    recordSize: int ## Both value records together, in bytes.
     case classed: bool
     of false:
-      pairs: seq[Table[uint16, int]] ## Per coverage index: second glyph to x advance.
+      base: int ## The subtable, which the pair set offsets count from.
+      pairSets: int ## The pair set offsets, one per coverage index.
+      setCount: int
     of true:
       class1, class2: ClassDef
-      class2Count: int
-      advances: seq[int] ## `class1Count * class2Count` x advances.
+      class1Count, class2Count: int
+      records: int ## The `class1Count` by `class2Count` value records.
 
   CharMap = object
     ## Where the chosen `cmap` subtable's arrays are; looked up on demand.
@@ -371,9 +369,21 @@ proc addContour(path: var BezPath, pts: openArray[TtPoint]) =
     path.quadTo control, first
   path.closePath()
 
-proc glyfOutline(f: ParsedFont, glyph: int, depth: int): BezPath
+const maxGlyphWork = 1 shl 17
+  ## How many points and components one glyph may take, counted over all its
+  ## components and theirs. `maxp` caps a composite at 65535 points, so this
+  ## is generous for real fonts, but it stops a font whose composites repeat
+  ## composites that repeat others, which would grow exponentially with the
+  ## depth.
 
-proc simpleGlyph(f: ParsedFont, at, contours: int): BezPath =
+proc spend(budget: var int, work: int) =
+  budget -= work
+  if budget < 0:
+    raise newException(FontError, "glyph is too complex to draw")
+
+proc glyfPart(f: ParsedFont, glyph, depth: int, budget: var int): BezPath
+
+proc simpleGlyph(f: ParsedFont, at, contours: int, budget: var int): BezPath =
   var ends = newSeq[int](contours)
   var pos = at + 10
   for i in 0 ..< contours:
@@ -388,6 +398,7 @@ proc simpleGlyph(f: ParsedFont, at, contours: int): BezPath =
       0
     else:
       ends[^1] + 1
+  budget.spend(numPoints)
   let instructionLength = f.data.u16(pos)
   pos += 2 + instructionLength
   var flags = newSeq[int](numPoints)
@@ -433,9 +444,10 @@ proc simpleGlyph(f: ParsedFont, at, contours: int): BezPath =
     result.addContour(pts[first .. ends[c]])
     first = ends[c] + 1
 
-proc compositeGlyph(f: ParsedFont, at, depth: int): BezPath =
+proc compositeGlyph(f: ParsedFont, at, depth: int, budget: var int): BezPath =
   var pos = at + 10
   while true:
+    budget.spend(1)
     let flags = f.data.u16(pos)
     let glyphIndex = f.data.u16(pos + 2)
     pos += 4
@@ -467,12 +479,12 @@ proc compositeGlyph(f: ParsedFont, at, depth: int): BezPath =
       m.c = f.data.f2dot14(pos + 4)
       m.d = f.data.f2dot14(pos + 6)
       pos += 8
-    result.extend m.transform(f.glyfOutline(glyphIndex, depth + 1))
+    result.extend m.transform(f.glyfPart(glyphIndex, depth + 1, budget))
     if (flags and 0x20) == 0:
       break
 
-proc glyfOutline(f: ParsedFont, glyph: int, depth: int): BezPath =
-  ## The outline in font units, y up, as the font stores it.
+proc glyfPart(f: ParsedFont, glyph, depth: int, budget: var int): BezPath =
+  ## A glyph or a component of one, drawn from what is left of `budget`.
   if glyph < 0 or glyph >= f.numGlyphs or depth > 8:
     return
   let start = f.glyf[0] + f.loca[glyph]
@@ -482,9 +494,15 @@ proc glyfOutline(f: ParsedFont, glyph: int, depth: int): BezPath =
   f.data.check(start, length)
   let contours = f.data.i16(start)
   if contours >= 0:
-    f.simpleGlyph(start, contours)
+    f.simpleGlyph(start, contours, budget)
   else:
-    f.compositeGlyph(start, depth)
+    f.compositeGlyph(start, depth, budget)
+
+proc glyfOutline(f: ParsedFont, glyph: int): BezPath =
+  ## The outline in font units, y up, as the font stores it. Raises
+  ## `FontError` for a glyph that takes more than `maxGlyphWork`.
+  var budget = maxGlyphWork
+  f.glyfPart(glyph, 0, budget)
 
 # CFF outlines
 
@@ -630,6 +648,12 @@ type CharstringState = object
   open: bool
   ended: bool ## Set by `endchar`, which ends the glyph from any subroutine depth.
   depth: int
+  budget: int
+    ## Operands and operators left to run, over the glyph and every
+    ## subroutine it calls: subroutines that call others many times would
+    ## otherwise grow exponentially with the depth.
+
+const maxCharstringWork = 1 shl 16 ## Real glyphs run a few hundred to a few thousand.
 
 proc moveTo(s: var CharstringState, dx, dy: float64) =
   if s.open:
@@ -665,6 +689,7 @@ proc runCharstring(f: ParsedFont, s: var CharstringState, start, length: int) =
   var pos = start
   let stop = start + length
   while pos < stop:
+    s.budget.spend(1)
     let b0 = f.data.u8(pos)
     inc pos
     if b0 >= 32 or b0 == 28:
@@ -890,7 +915,7 @@ proc runCharstring(f: ParsedFont, s: var CharstringState, start, length: int) =
 proc cffOutline(f: ParsedFont, glyph: int): BezPath =
   if glyph < 0 or glyph >= f.cff.charStrings.len:
     return
-  var s: CharstringState
+  var s = CharstringState(budget: maxCharstringWork)
   let (start, length) = f.cff.charStrings[glyph]
   f.runCharstring(s, start, length)
   if s.open:
@@ -899,64 +924,80 @@ proc cffOutline(f: ParsedFont, glyph: int): BezPath =
 
 # Kerning from GPOS
 
+# The tables are read in place: parsing checks that their arrays fit in the
+# data, and lookups binary-search them, since the spec sorts them. So a table
+# that several others point to costs nothing extra, and one that isn't sorted
+# gives wrong kerning but never more work than the search.
+
+func lastAtOrBefore(data: Bytes, at, count, stride, key: int): int =
+  ## The last of `count` records of `stride` bytes at `at` whose first 16-bit
+  ## field is at most `key`, or -1.
+  var lo = 0
+  var hi = count
+  while lo < hi:
+    let mid = (lo + hi) div 2
+    if data.u16(at + mid * stride) <= key:
+      lo = mid + 1
+    else:
+      hi = mid
+  lo - 1
+
 proc readCoverage(data: Bytes, at: int): Coverage =
   let format = data.u16(at)
+  let count = data.u16(at + 2)
   case format
   of 1:
-    result = Coverage(ranged: false)
-    let count = data.u16(at + 2)
-    for i in 0 ..< count:
-      result.glyphs[uint16(data.u16(at + 4 + i * 2))] = i
+    data.checkArray(at + 4, count, 2) # glyph ids
   of 2:
-    result = Coverage(ranged: true)
-    let count = data.u16(at + 2)
-    for i in 0 ..< count:
-      let rec = at + 4 + i * 6
-      result.starts.add uint16(data.u16(rec))
-      result.ends.add uint16(data.u16(rec + 2))
-      result.firstIndex.add data.u16(rec + 4)
+    data.checkArray(at + 4, count, 6) # start, end, coverage index of the start
   else:
     raise newException(FontError, "unknown coverage format")
+  Coverage(format: format, at: at + 4, count: count)
 
-func index(c: Coverage, glyph: uint16): int =
-  if c.ranged:
-    for i in 0 ..< c.starts.len:
-      if glyph >= c.starts[i] and glyph <= c.ends[i]:
-        return c.firstIndex[i] + int(glyph - c.starts[i])
-    -1
+func index(c: Coverage, data: Bytes, glyph: int): int =
+  ## The glyph's coverage index, or -1.
+  if c.format == 1:
+    let i = data.lastAtOrBefore(c.at, c.count, 2, glyph)
+    if i >= 0 and data.u16(c.at + i * 2) == glyph: i else: -1
   else:
-    c.glyphs.getOrDefault(glyph, -1)
+    let i = data.lastAtOrBefore(c.at, c.count, 6, glyph)
+    if i < 0:
+      return -1
+    let rec = c.at + i * 6
+    let start = data.u16(rec)
+    if glyph <= data.u16(rec + 2):
+      data.u16(rec + 4) + glyph - start
+    else:
+      -1
 
 proc readClassDef(data: Bytes, at: int): ClassDef =
   let format = data.u16(at)
   case format
   of 1:
-    result = ClassDef(ranged: false)
-    result.startGlyph = data.u16(at + 2)
+    # The classes of a run of glyphs from `startGlyph`.
     let count = data.u16(at + 4)
-    for i in 0 ..< count:
-      result.classes.add data.u16(at + 6 + i * 2)
+    data.checkArray(at + 6, count, 2)
+    ClassDef(format: 1, startGlyph: data.u16(at + 2), at: at + 6, count: count)
   of 2:
-    result = ClassDef(ranged: true)
+    # Ranges: start, end and class.
     let count = data.u16(at + 2)
-    for i in 0 ..< count:
-      let rec = at + 4 + i * 6
-      result.starts.add uint16(data.u16(rec))
-      result.ends.add uint16(data.u16(rec + 2))
-      result.values.add data.u16(rec + 4)
+    data.checkArray(at + 4, count, 6)
+    ClassDef(format: 2, at: at + 4, count: count)
   else:
     raise newException(FontError, "unknown class definition format")
 
-func classOf(c: ClassDef, glyph: uint16): int =
-  if c.ranged:
-    for i in 0 ..< c.starts.len:
-      if glyph >= c.starts[i] and glyph <= c.ends[i]:
-        return c.values[i]
-    0
+func classOf(c: ClassDef, data: Bytes, glyph: int): int =
+  ## The glyph's class; 0 for glyphs the table doesn't list.
+  if c.format == 1:
+    let i = glyph - c.startGlyph
+    if i >= 0 and i < c.count:
+      data.u16(c.at + i * 2)
+    else:
+      0
   else:
-    let i = int(glyph) - c.startGlyph
-    if i >= 0 and i < c.classes.len:
-      c.classes[i]
+    let i = data.lastAtOrBefore(c.at, c.count, 6, glyph)
+    if i >= 0 and glyph <= data.u16(c.at + i * 6 + 2):
+      data.u16(c.at + i * 6 + 4)
     else:
       0
 
@@ -986,36 +1027,68 @@ proc readPairPos(data: Bytes, at: int): PairLookup =
   let recordSize = valueSize(vf1) + valueSize(vf2)
   case format
   of 1:
-    result = PairLookup(classed: false, coverage: coverage)
+    # One pair set per covered first glyph, each checked when it is used.
     let setCount = data.u16(at + 8)
-    for i in 0 ..< setCount:
-      let pairSet = at + data.u16(at + 10 + i * 2)
-      let pairCount = data.u16(pairSet)
-      var pairs: Table[uint16, int]
-      for p in 0 ..< pairCount:
-        let rec = pairSet + 2 + p * (2 + recordSize)
-        pairs[uint16(data.u16(rec))] = data.xAdvance(rec + 2, vf1)
-      result.pairs.add pairs
+    data.checkArray(at + 10, setCount, 2)
+    PairLookup(
+      classed: false,
+      coverage: coverage,
+      valueFormat: vf1,
+      recordSize: recordSize,
+      base: at,
+      pairSets: at + 10,
+      setCount: setCount,
+    )
   of 2:
-    result = PairLookup(classed: true, coverage: coverage)
-    result.class1 = data.readClassDef(at + data.u16(at + 8))
-    result.class2 = data.readClassDef(at + data.u16(at + 10))
+    # A matrix of value records by first and second class. Both counts come
+    # from the font, so the matrix has to fit in it. A row is at most 65535
+    # records of 32 bytes, so its size fits in `int` everywhere, and once the
+    # rows fit, any offset into them does too.
     let class1Count = data.u16(at + 12)
-    result.class2Count = data.u16(at + 14)
-    # Both counts come from the font, so the records have to fit in it
-    # before anything is allocated for them. A row is at most 65535 records
-    # of 32 bytes, so it fits in `int` everywhere, and once the rows fit, so
-    # does the record count. Without x advances every pair adjusts by 0,
-    # which an empty list gives too.
-    if (vf1 and 4) == 0:
-      return
-    let rowSize = result.class2Count * recordSize
-    data.checkArray(at + 16, class1Count, rowSize)
-    result.advances = newSeq[int](class1Count * result.class2Count)
-    for i in 0 ..< result.advances.len:
-      result.advances[i] = data.xAdvance(at + 16 + i * recordSize, vf1)
+    let class2Count = data.u16(at + 14)
+    data.checkArray(at + 16, class1Count, class2Count * recordSize)
+    PairLookup(
+      classed: true,
+      coverage: coverage,
+      valueFormat: vf1,
+      recordSize: recordSize,
+      class1: data.readClassDef(at + data.u16(at + 8)),
+      class2: data.readClassDef(at + data.u16(at + 10)),
+      class1Count: class1Count,
+      class2Count: class2Count,
+      records: at + 16,
+    )
   else:
     raise newException(FontError, "unknown pair adjustment format")
+
+func pairValue(data: Bytes, sub: PairLookup, a, b: int, value: var int): bool =
+  ## Whether the subtable covers the pair, with its x advance adjustment in
+  ## `value`. A glyph-pair subtable covers it when it lists the second glyph,
+  ## a class subtable whenever it covers the first.
+  let index = sub.coverage.index(data, a)
+  if index < 0:
+    return false
+  if sub.classed:
+    let c1 = sub.class1.classOf(data, a)
+    let c2 = sub.class2.classOf(data, b)
+    if c1 < sub.class1Count and c2 < sub.class2Count:
+      let rec =
+        sub.records + c1 * (sub.class2Count * sub.recordSize) + c2 * sub.recordSize
+      value = data.xAdvance(rec, sub.valueFormat)
+    return true
+  if index >= sub.setCount:
+    return false
+  # The pair set: a count, then records of the second glyph and the values,
+  # sorted by the second glyph.
+  let pairSet = sub.base + data.u16(sub.pairSets + index * 2)
+  let pairCount = data.u16(pairSet)
+  let stride = 2 + sub.recordSize
+  data.checkArray(pairSet + 2, pairCount, stride)
+  let i = data.lastAtOrBefore(pairSet + 2, pairCount, stride, b)
+  if i < 0 or data.u16(pairSet + 2 + i * stride) != b:
+    return false
+  value = data.xAdvance(pairSet + 4 + i * stride, sub.valueFormat)
+  true
 
 proc readKerning(f: ParsedFont) =
   ## The pair adjustment lookups of the `kern` feature for the Latin script,
@@ -1041,22 +1114,38 @@ proc readKerning(f: ParsedFont) =
     return
   let langSys = script + langSysOffset
   let featureCount = f.data.u16(langSys + 4)
+  # Each count here can be 65535 and the tables can point at each other, so
+  # the work is limited by the size of the font: a real font's kerning takes
+  # far less than one step per byte. Each feature and each lookup is read
+  # once, however often it is listed.
+  var budget = max(1 shl 16, f.data.len)
+  var seenFeature = newSeq[bool](0x10000)
+  var seenLookup = newSeq[bool](0x10000)
   var lookups: seq[int]
   for i in 0 ..< featureCount:
+    budget.spend(1)
     let featureIndex = f.data.u16(langSys + 6 + i * 2)
+    if seenFeature[featureIndex]:
+      continue
+    seenFeature[featureIndex] = true
     let rec = featureList + 2 + featureIndex * 6
     if f.data.tag(rec) != "kern":
       continue
     let feature = featureList + f.data.u16(rec + 4)
     let lookupCount = f.data.u16(feature + 2)
     for k in 0 ..< lookupCount:
-      lookups.add f.data.u16(feature + 4 + k * 2)
+      budget.spend(1)
+      let lookupIndex = f.data.u16(feature + 4 + k * 2)
+      if not seenLookup[lookupIndex]:
+        seenLookup[lookupIndex] = true
+        lookups.add lookupIndex
   for lookupIndex in lookups:
     let lookup = lookupList + f.data.u16(lookupList + 2 + lookupIndex * 2)
     let lookupType = f.data.u16(lookup)
     let subCount = f.data.u16(lookup + 4)
     var subtables: seq[PairLookup]
     for i in 0 ..< subCount:
+      budget.spend(1)
       var sub = lookup + f.data.u16(lookup + 6 + i * 2)
       var kind = lookupType
       if kind == 9:
@@ -1070,24 +1159,20 @@ proc readKerning(f: ParsedFont) =
 func kerning(f: ParsedFont, first, second: GlyphId): int =
   ## The x advance adjustment between two glyphs, in font units. Every
   ## lookup applies, and within one the first subtable that covers the pair
-  ## decides: a glyph-pair subtable covers it when it lists the second glyph,
-  ## a class subtable whenever it covers the first.
-  let a = uint16(first)
-  let b = uint16(second)
+  ## decides (see `pairValue`). A pair set that doesn't fit in the data
+  ## counts as not covering the pair, so layout doesn't fail over one.
+  let a = int(uint16(first))
+  let b = int(uint16(second))
   for subtables in f.kerning:
     for sub in subtables:
-      let index = sub.coverage.index(a)
-      if index < 0:
-        continue
-      if sub.classed:
-        let c1 = sub.class1.classOf(a)
-        let c2 = sub.class2.classOf(b)
-        let i = c1 * sub.class2Count + c2
-        if i < sub.advances.len:
-          result += sub.advances[i]
-        break
-      elif index < sub.pairs.len and b in sub.pairs[index]:
-        result += sub.pairs[index][b]
+      var value = 0
+      var covered = false
+      try:
+        covered = f.data.pairValue(sub, a, b, value)
+      except FontError:
+        covered = false
+      if covered:
+        result += value
         break
 
 # Loading
@@ -1161,7 +1246,7 @@ proc glyphDrawing*(e: OpenTypeEngine, font: Font, glyph: GlyphId): GlyphDrawing 
       if f.hasCff:
         f.cffOutline(int(uint16(glyph)))
       else:
-        f.glyfOutline(int(uint16(glyph)), 0)
+        f.glyfOutline(int(uint16(glyph)))
     let s = 1.0 / f.unitsPerEm.float64
     result.path = scale(s, -s).transform(outline)
   except FontError:
