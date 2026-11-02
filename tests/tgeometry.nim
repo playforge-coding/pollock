@@ -190,6 +190,7 @@ suite "arcs":
     same.arcTo(3.0, point(5, 5))
     check same.flatten(0.1).len == 0
     check same.toCubics.len == 1
+    check same.boundingBox == rect(5, 5, 5, 5)
 
   test "flattened arcs lie on the circle":
     var p = newPath()

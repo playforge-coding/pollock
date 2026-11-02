@@ -852,9 +852,13 @@ func boundingBox*(path: BezPath): Rect =
       pen = el.cubicEnd
     of peArcTo:
       take rectFromPoints(pen, el.arcEnd)
-      let a = el.toArc(pen)
-      if not a.isDegenerate:
-        take a.boundingBox
+      # An arc that ends where it starts draws nothing, as in `flatten` and
+      # `toCubics`; its center form would sit on the pen, a radius away from
+      # every point of the path.
+      if not (el.arcEnd ~= pen):
+        let a = el.toArc(pen)
+        if not a.isDegenerate:
+          take a.boundingBox
       pen = el.arcEnd
     of peClosePath:
       pen = start
