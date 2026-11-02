@@ -30,12 +30,13 @@ type
   Font* = ref object
     ## A font file in memory. Make one with `newFont` and treat it as
     ## immutable afterwards: engines cache what they parse from it in
-    ## `cache`, and the drawings they produce in `drawings`.
+    ## `cache`, and `cachedDrawing` keeps their drawings in `drawings`.
     data*: seq[uint8]
     index*: int ## The face in a collection (`ttcf`); 0 otherwise.
     variations*: seq[FontVariation]
     cache*: RootRef ## Engine-private parsed form.
-    drawings*: Table[GlyphId, GlyphDrawing]
+    drawings*: Table[(string, GlyphId), ref GlyphDrawing]
+      ## By the name of the engine's type and the glyph.
 
   Glyph* = object
     id*: GlyphId
@@ -124,14 +125,18 @@ func bounds*(layout: TextLayout): Rect =
   ## The box the line takes up, with the origin on the baseline.
   rect(0, -layout.ascent, layout.width, layout.descent)
 
-proc cachedDrawing*[E](engine: E, font: Font, glyph: GlyphId): GlyphDrawing =
+proc cachedDrawing*[E](engine: E, font: Font, glyph: GlyphId): ref GlyphDrawing =
   ## The engine's drawing for a glyph, kept on the font so it is made once
-  ## however many runs use it. Backends draw from this.
+  ## however many runs use it. Backends draw from this. Each engine type
+  ## keeps its own drawings, so two engines can share a font. The drawing is
+  ## shared rather than copied, so don't change it.
   mixin glyphDrawing
-  if glyph in font.drawings:
-    return font.drawings[glyph]
-  result = engine.glyphDrawing(font, glyph)
-  font.drawings[glyph] = result
+  let key = ($E, glyph)
+  result = font.drawings.getOrDefault(key)
+  if result == nil:
+    result = new GlyphDrawing
+    result[] = engine.glyphDrawing(font, glyph)
+    font.drawings[key] = result
 
 # The default engine
 

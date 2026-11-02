@@ -14,7 +14,7 @@
 ## the default engine, and `newSvgContext(width, height, engine)` makes an
 ## `SvgContextOf` over any other.
 
-import std/[base64, math, strutils]
+import std/[base64, math, strutils, tables]
 import ../[context, png]
 
 export context
@@ -31,7 +31,8 @@ type
     engine*: E ## The text engine whose glyphs it draws.
     defs: seq[string]
     body: seq[string]
-    gradients: seq[(Paint, string)] ## Gradients already in `defs`, with their ids.
+    gradients: Table[string, string]
+      ## The markup of each gradient already in `defs`, without its id, to the id.
     state: SvgState
     stack: seq[SvgState]
     nextId: int
@@ -123,26 +124,32 @@ proc stopsMarkup(stops: seq[GradientStop]): string =
 proc gradientId[E](ctx: var SvgContextOf[E], paint: Paint): string =
   ## The id of the gradient's definition, added to `defs` the first time
   ## the paint is used, so text (one path per glyph) doesn't repeat it.
-  for (known, id) in ctx.gradients:
-    if known == paint:
-      return id
-  result = ctx.newId("g")
+  ## Gradients are looked up by their markup without the id, so paints that
+  ## would be written the same way share a definition.
+  var element, markup: string
   case paint.kind
   of pkLinearGradient:
-    ctx.defs.add "<linearGradient id=\"" & result &
-      "\" gradientUnits=\"userSpaceOnUse\" x1=\"" & fmt(paint.start.x) & "\" y1=\"" &
+    element = "linearGradient"
+    markup =
+      " gradientUnits=\"userSpaceOnUse\" x1=\"" & fmt(paint.start.x) & "\" y1=\"" &
       fmt(paint.start.y) & "\" x2=\"" & fmt(paint.stop.x) & "\" y2=\"" &
       fmt(paint.stop.y) & "\" spreadMethod=\"" & spreadMethod(paint.linearExtend) & "\">" &
-      stopsMarkup(paint.linearStops) & "</linearGradient>"
+      stopsMarkup(paint.linearStops)
   of pkRadialGradient:
-    ctx.defs.add "<radialGradient id=\"" & result &
-      "\" gradientUnits=\"userSpaceOnUse\" cx=\"" & fmt(paint.center.x) & "\" cy=\"" &
+    element = "radialGradient"
+    markup =
+      " gradientUnits=\"userSpaceOnUse\" cx=\"" & fmt(paint.center.x) & "\" cy=\"" &
       fmt(paint.center.y) & "\" r=\"" & fmt(max(0.0, paint.radius)) &
       "\" spreadMethod=\"" & spreadMethod(paint.radialExtend) & "\">" &
-      stopsMarkup(paint.radialStops) & "</radialGradient>"
+      stopsMarkup(paint.radialStops)
   of pkSolid:
-    discard
-  ctx.gradients.add (paint, result)
+    return ""
+  let key = element & markup
+  result = ctx.gradients.getOrDefault(key)
+  if result.len == 0:
+    result = ctx.newId("g")
+    ctx.defs.add "<" & element & " id=\"" & result & "\"" & markup & "</" & element & ">"
+    ctx.gradients[key] = result
 
 proc paintAttrs[E](ctx: var SvgContextOf[E], paint: Paint, attr: string): string =
   ## `fill="..."` or `stroke="..."` plus the matching opacity attribute,

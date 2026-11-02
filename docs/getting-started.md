@@ -124,4 +124,4 @@ The value is a module path, so a backend from another package works too (`-d:pol
 
 ## Next
 
-[Examples](examples.md) has five animated scenes (an orrery, fireworks, a Bezier curve editor, meshing gears and a flow field) that run in a native window and react to the mouse, with the code in `examples/`.
+[Examples](examples.md) has six animated scenes (an orrery, fireworks, a Bezier curve editor, meshing gears, a flow field and lettering set glyph by glyph) that run in a native window and react to the mouse, with the code in `examples/`.

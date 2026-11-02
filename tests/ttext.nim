@@ -22,6 +22,14 @@ let
   fonts = [("TrueType", trueType), ("CFF", cff)]
   engine = defaultTextEngine()
 
+type SquareEngine = object ## Draws every glyph as the same square.
+
+proc layout(e: SquareEngine, text: string, style: TextStyle): TextLayout =
+  discard
+
+proc glyphDrawing(e: SquareEngine, font: Font, glyph: GlyphId): GlyphDrawing =
+  GlyphDrawing(kind: gkOutline, path: rect(0, -1, 1, 0).toPath)
+
 func near(a, b: float64, tolerance = 0.01): bool =
   abs(a - b) <= tolerance
 
@@ -156,9 +164,20 @@ suite "text engine":
     discard engine.cachedDrawing(font, id)
     discard engine.cachedDrawing(font, id)
     check font.drawings.len == 1
+    check engine.cachedDrawing(font, id) == engine.cachedDrawing(font, id)
     var ctx = newCpuContext(40, 40)
     ctx.drawText("xx", textStyle(font, 20), point(0, 30))
     check font.drawings.len == 1
+
+  test "each engine type keeps its own drawings of a font":
+    let font = newFont(trueTypeData)
+    let id = engine.glyphFor(font, Rune('x'))
+    let outline = engine.cachedDrawing(font, id)
+    let square = SquareEngine().cachedDrawing(font, id)
+    check outline.path != square.path
+    check square.path == SquareEngine().glyphDrawing(font, id).path
+    check engine.cachedDrawing(font, id) == outline
+    check font.drawings.len == 2
 
   test "a font the engine can't read raises from layout and draws nothing":
     let bad = newFont("this is not a font")

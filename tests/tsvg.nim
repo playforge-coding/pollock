@@ -114,10 +114,15 @@ suite "svg backend":
     ctx.stroke(
       line(0, 0, 10, 10), linearGradient(point(0, 0), point(10, 0), red, green)
     )
+    let radial = radialGradient(point(5, 5), 5, red, blue)
+    ctx.fill(circle(5, 5, 5), radial)
+    ctx.fill(circle(5, 5, 2), radial)
     let doc = ctx.toSvg
     check doc.count("<linearGradient") == 2
     check doc.count("url(#g1)") == 2
     check "stroke=\"url(#g2)\"" in doc
+    check doc.count("<radialGradient") == 1
+    check doc.count("url(#g3)") == 2
 
   test "clips open groups that restore closes":
     var ctx = newSvgContext(10, 10)

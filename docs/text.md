@@ -73,6 +73,6 @@ Backends are generic over their engine: `CpuContext` is `CpuContextOf[OpenTypeEn
 
 ## What a glyph looks like
 
-An engine describes a glyph as a `GlyphDrawing`: an outline (`gkOutline`, a `BezPath`), color layers each with a paint (`gkLayers`) or a bitmap with the rectangle it covers (`gkBitmap`). All of it is in em units with y down and the baseline at 0, so a drawing is scaled by the run's size and moved to the glyph's position. `engine.glyphDrawing(font, id)` makes one and `engine.cachedDrawing(font, id)` keeps it on the font.
+An engine describes a glyph as a `GlyphDrawing`: an outline (`gkOutline`, a `BezPath`), color layers each with a paint (`gkLayers`) or a bitmap with the rectangle it covers (`gkBitmap`). All of it is in em units with y down and the baseline at 0, so a drawing is scaled by the run's size and moved to the glyph's position. `engine.glyphDrawing(font, id)` makes one and `engine.cachedDrawing(font, id)` keeps it on the font, separately for each engine type, and returns a `ref` to the one it keeps. That drawing is shared by every run that uses the glyph, so don't change it.
 
 That is what lets every backend draw text: one without native glyph drawing fills the outlines with `fillPath` and the bitmaps with `drawImage` (`drawGlyphsAsPaths` in `pollock/context` does exactly that), and the pure Nim engine only ever produces outlines today. See [Writing a backend](writing-a-backend.md#text) for the backend side and [Architecture](architecture.md#text) for the design of the rest.

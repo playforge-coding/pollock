@@ -52,6 +52,12 @@ type
       class2Count: int
       advances: seq[int] ## `class1Count * class2Count` x advances.
 
+  CharMap = object
+    ## Where the chosen `cmap` subtable's arrays are; looked up on demand.
+    format: int ## 4 or 12; 0 before it is read.
+    at: int ## The first array: the end codes (format 4) or the groups (format 12).
+    count: int ## Segments or groups.
+
   CffFont = object
     charStrings: seq[(int, int)] ## Offset and length of each glyph's charstring.
     globalSubrs, localSubrs: seq[(int, int)]
@@ -63,7 +69,7 @@ type
     ascender, descender, lineGap: int
     numGlyphs: int
     advances: seq[uint16]
-    cmap: Table[int, uint16]
+    cmap: CharMap
     loca: seq[int] ## Glyph offsets into `glyf`, `numGlyphs + 1` of them; empty for CFF.
     glyf: (int, int)
     cff: CffFont
@@ -77,12 +83,27 @@ proc defaultTextEngine*(): OpenTypeEngine =
 # Reading big-endian fields with bounds checks that raise `FontError`
 
 func check(data: Bytes, pos, size: int) =
-  if pos < 0 or size < 0 or pos + size > data.len:
+  # Compared without adding, which could overflow `int` on JavaScript.
+  if pos < 0 or size < 0 or pos > data.len or size > data.len - pos:
+    raise newException(FontError, "font data ends early")
+
+func checkArray(data: Bytes, pos, count, itemSize: int) =
+  ## Checks that `count` items of `itemSize` bytes fit at `pos`, without
+  ## computing their total size, which could overflow.
+  data.check(pos, 0)
+  if count < 0 or (itemSize > 0 and count > (data.len - pos) div itemSize):
     raise newException(FontError, "font data ends early")
 
 func u8(data: Bytes, pos: int): int =
   data.check(pos, 1)
   int(data[pos])
+
+func i8(data: Bytes, pos: int): int =
+  let v = data.u8(pos)
+  if v >= 0x80:
+    v - 0x100
+  else:
+    v
 
 func u16(data: Bytes, pos: int): int =
   data.check(pos, 2)
@@ -96,11 +117,25 @@ func i16(data: Bytes, pos: int): int =
     v
 
 func u32(data: Bytes, pos: int): int =
-  # As an int so that offsets add up without overflow checks on JS, where
-  # int is 32 bits: font files are far smaller than 2 GB.
+  ## An unsigned 32-bit field as an `int`, which is 32 bits on JavaScript. No
+  ## offset, length, count or code point in a font reaches 2^31, so a value
+  ## that does raises `FontError` rather than coming out negative there.
   data.check(pos, 4)
+  if data[pos] >= 0x80:
+    raise newException(FontError, "font field out of range")
   int(data[pos]) shl 24 or int(data[pos + 1]) shl 16 or int(data[pos + 2]) shl 8 or
     int(data[pos + 3])
+
+func offset32(data: Bytes, pos: int): int =
+  ## A 32-bit offset, length or count, which can't exceed the file's size.
+  ## Checking that keeps sums of two of them within `int` on every target.
+  result = data.u32(pos)
+  if result > data.len:
+    raise newException(FontError, "font offset past the end of the data")
+
+func fixed(data: Bytes, pos: int): float64 =
+  ## A signed 16.16 fixed-point number.
+  data.i16(pos).float64 + data.u16(pos + 2).float64 / 65536.0
 
 func tag(data: Bytes, pos: int): string =
   data.check(pos, 4)
@@ -116,19 +151,18 @@ func f2dot14(data: Bytes, pos: int): float64 =
 proc readTables(f: ParsedFont, index: int) =
   var base = 0
   if f.data.tag(0) == "ttcf":
-    let count = f.data.u32(8)
+    let count = f.data.offset32(8)
     if index < 0 or index >= count:
       raise newException(FontError, "no face " & $index & " in the collection")
-    base = f.data.u32(12 + index * 4)
-  let version = f.data.u32(base)
-  if version != 0x00010000 and version != 0x4F54544F and version != 0x74727565:
+    base = f.data.offset32(12 + index * 4)
+  if f.data.tag(base) notin ["\0\x01\0\0", "OTTO", "true"]:
     raise newException(FontError, "not an OpenType font")
   let numTables = f.data.u16(base + 4)
   for i in 0 ..< numTables:
     let rec = base + 12 + i * 16
     let tag = f.data.tag(rec)
-    let offset = f.data.u32(rec + 8)
-    let length = f.data.u32(rec + 12)
+    let offset = f.data.offset32(rec + 8)
+    let length = f.data.offset32(rec + 12)
     f.data.check(offset, length)
     f.tables[tag] = (offset, length)
 
@@ -164,44 +198,20 @@ func advance(f: ParsedFont, glyph: GlyphId): int =
 # Character map
 
 proc readCmapFormat4(f: ParsedFont, sub: int) =
+  # Four arrays of `segCount` 16-bit values (end codes, start codes, deltas
+  # and range offsets) with a reserved field after the first.
   let segCountX2 = f.data.u16(sub + 6)
-  let segCount = segCountX2 div 2
-  let ends = sub + 14
-  let starts = ends + segCountX2 + 2
-  let deltas = starts + segCountX2
-  let rangeOffsets = deltas + segCountX2
-  for s in 0 ..< segCount:
-    let endCode = f.data.u16(ends + s * 2)
-    let startCode = f.data.u16(starts + s * 2)
-    let delta = f.data.u16(deltas + s * 2)
-    let rangeOffset = f.data.u16(rangeOffsets + s * 2)
-    if startCode > endCode:
-      continue
-    for c in startCode .. min(endCode, 0xFFFE):
-      var g: int
-      if rangeOffset == 0:
-        g = (c + delta) and 0xFFFF
-      else:
-        let at = rangeOffsets + s * 2 + rangeOffset + (c - startCode) * 2
-        g = f.data.u16(at)
-        if g != 0:
-          g = (g + delta) and 0xFFFF
-      if g != 0:
-        f.cmap[c] = uint16(g)
+  f.data.check(sub + 14, segCountX2 * 4 + 2)
+  f.cmap = CharMap(format: 4, at: sub + 14, count: segCountX2 div 2)
 
 proc readCmapFormat12(f: ParsedFont, sub: int) =
-  let numGroups = f.data.u32(sub + 12)
-  for i in 0 ..< numGroups:
-    let group = sub + 16 + i * 12
-    let startChar = f.data.u32(group)
-    let endChar = f.data.u32(group + 4)
-    let startGlyph = f.data.u32(group + 8)
-    if startChar > endChar or endChar > 0x10FFFF:
-      continue
-    for c in startChar .. endChar:
-      let g = startGlyph + (c - startChar)
-      if g != 0 and g <= 0xFFFF:
-        f.cmap[c] = uint16(g)
+  # Groups of start code, end code and start glyph, 32 bits each. Every field
+  # is read once here, so the lookups that follow can't fail.
+  let numGroups = f.data.offset32(sub + 12)
+  f.data.checkArray(sub + 16, numGroups, 12)
+  for i in 0 ..< numGroups * 3:
+    discard f.data.u32(sub + 16 + i * 4)
+  f.cmap = CharMap(format: 12, at: sub + 16, count: numGroups)
 
 proc readCmap(f: ParsedFont) =
   let cmap = f.table("cmap")
@@ -214,7 +224,7 @@ proc readCmap(f: ParsedFont) =
     let rec = cmap + 4 + i * 8
     let platform = f.data.u16(rec)
     let encoding = f.data.u16(rec + 2)
-    let offset = cmap + f.data.u32(rec + 4)
+    let offset = cmap + f.data.offset32(rec + 4)
     let format = f.data.u16(offset)
     let unicode = platform == 0 or (platform == 3 and encoding in {1, 10})
     if not unicode:
@@ -235,7 +245,75 @@ proc readCmap(f: ParsedFont) =
     f.readCmapFormat4(best)
 
 func glyphFor(f: ParsedFont, c: int): GlyphId =
-  GlyphId(f.cmap.getOrDefault(c, 0))
+  ## Looks the character up with a binary search, as the spec intends: the
+  ## segments and groups are sorted. A table that isn't gives wrong glyphs,
+  ## but never more work than that search.
+  let m = f.cmap
+  case m.format
+  of 4:
+    if c < 0 or c >= 0xFFFF:
+      return notdef
+    let ends = m.at
+    let starts = ends + m.count * 2 + 2
+    let deltas = starts + m.count * 2
+    let rangeOffsets = deltas + m.count * 2
+    # The first segment that ends at or after `c`.
+    var lo = 0
+    var hi = m.count
+    while lo < hi:
+      let mid = (lo + hi) div 2
+      if f.data.u16(ends + mid * 2) < c:
+        lo = mid + 1
+      else:
+        hi = mid
+    if lo == m.count:
+      return notdef
+    let startCode = f.data.u16(starts + lo * 2)
+    if c < startCode:
+      return notdef
+    let delta = f.data.u16(deltas + lo * 2)
+    let rangeOffset = f.data.u16(rangeOffsets + lo * 2)
+    var g: int
+    if rangeOffset == 0:
+      g = (c + delta) and 0xFFFF
+    else:
+      # An index into the glyph array that follows, which is only checked
+      # here: an entry past the end of the data maps to nothing.
+      let at = rangeOffsets + lo * 2 + rangeOffset + (c - startCode) * 2
+      if at + 2 > f.data.len:
+        return notdef
+      g = f.data.u16(at)
+      if g != 0:
+        g = (g + delta) and 0xFFFF
+    GlyphId(g)
+  of 12:
+    if c < 0 or c > 0x10FFFF:
+      return notdef
+    # The last group that starts at or before `c`.
+    var lo = 0
+    var hi = m.count
+    while lo < hi:
+      let mid = (lo + hi) div 2
+      if f.data.u32(m.at + mid * 12) <= c:
+        lo = mid + 1
+      else:
+        hi = mid
+    if lo == 0:
+      return notdef
+    let group = m.at + (lo - 1) * 12
+    let startChar = f.data.u32(group)
+    if c > f.data.u32(group + 4):
+      return notdef
+    let startGlyph = f.data.u32(group + 8)
+    if startGlyph > 0xFFFF:
+      return notdef
+    let g = startGlyph + (c - startChar)
+    if g > 0xFFFF:
+      notdef
+    else:
+      GlyphId(g)
+  else:
+    notdef
 
 # TrueType outlines
 
@@ -247,7 +325,7 @@ proc readLoca(f: ParsedFont) =
   for i in 0 .. f.numGlyphs:
     f.loca[i] =
       if longOffsets:
-        f.data.u32(loca + i * 4)
+        f.data.offset32(loca + i * 4)
       else:
         f.data.u16(loca + i * 2) * 2
   f.glyf = f.tables["glyf"]
@@ -266,8 +344,9 @@ proc addContour(path: var BezPath, pts: openArray[TtPoint]) =
     inc start
   var first: Point
   if start == pts.len:
-    # No on-curve point at all: start at the midpoint of the first two.
-    start = 0
+    # No on-curve point at all: start at the midpoint of the last point and
+    # the first, so the walk below begins with the first as a control point.
+    start = pts.len - 1
     first = point((pts[0].x + pts[^1].x) * 0.5, (pts[0].y + pts[^1].y) * 0.5)
   else:
     first = point(pts[start].x, pts[start].y)
@@ -300,6 +379,10 @@ proc simpleGlyph(f: ParsedFont, at, contours: int): BezPath =
   for i in 0 ..< contours:
     ends[i] = f.data.u16(pos)
     pos += 2
+    # The last point of each contour, so they increase; the last one sets the
+    # number of points, which the slices below rely on.
+    if i > 0 and ends[i] <= ends[i - 1]:
+      raise newException(FontError, "glyph contours out of order")
   let numPoints =
     if contours == 0:
       0
@@ -347,8 +430,7 @@ proc simpleGlyph(f: ParsedFont, at, contours: int): BezPath =
     pts[i].y = v.float64
   var first = 0
   for c in 0 ..< contours:
-    if ends[c] >= first:
-      result.addContour(pts[first .. ends[c]])
+    result.addContour(pts[first .. ends[c]])
     first = ends[c] + 1
 
 proc compositeGlyph(f: ParsedFont, at, depth: int): BezPath =
@@ -366,8 +448,8 @@ proc compositeGlyph(f: ParsedFont, at, depth: int): BezPath =
       pos += 4
     else:
       if (flags and 2) != 0:
-        dx = float64(int8(f.data.u8(pos)))
-        dy = float64(int8(f.data.u8(pos + 1)))
+        dx = f.data.i8(pos).float64
+        dy = f.data.i8(pos + 1).float64
       pos += 2
     var m = affine(1, 0, 0, 1, dx, dy)
     if (flags and 8) != 0:
@@ -421,6 +503,9 @@ proc readIndex(data: Bytes, pos: int, items: var seq[(int, int)]): int =
     result = 0
     for b in 0 ..< offSize:
       result = result shl 8 or data.u8(offsets + i * offSize + b)
+    # Four bytes can come out negative on JavaScript, or past any data.
+    if result < 0 or result > data.len:
+      raise newException(FontError, "bad CFF index")
   items = newSeqOfCap[(int, int)](count)
   for i in 0 ..< count:
     let start = base + offset(i)
@@ -450,7 +535,8 @@ proc readDict(data: Bytes, start, length: int): Table[int, seq[float64]] =
       operands.add data.i16(pos + 1).float64
       pos += 3
     elif b0 == 29:
-      operands.add data.u32(pos + 1).float64
+      # A signed 32-bit integer.
+      operands.add data.i16(pos + 1).float64 * 65536.0 + data.u16(pos + 3).float64
       pos += 5
     elif b0 == 30:
       # A real number in nibbles.
@@ -493,6 +579,14 @@ proc readDict(data: Bytes, start, length: int): Table[int, seq[float64]] =
     else:
       inc pos
 
+func dictInt(data: Bytes, v: float64): int =
+  ## A DICT operand used as an offset or a size. Operands are reals, so one
+  ## too large to be either (or not a number at all) raises `FontError`
+  ## instead of a conversion that could fail or overflow.
+  if not (v >= 0 and v <= data.len.float64):
+    raise newException(FontError, "CFF offset out of range")
+  int(v)
+
 proc readCff(f: ParsedFont) =
   let (cff, _) = f.tables["CFF "]
   let hdrSize = f.data.u8(cff + 2)
@@ -510,13 +604,14 @@ proc readCff(f: ParsedFont) =
     raise newException(FontError, "only Type 2 charstrings are supported")
   if 17 notin top or top[17].len == 0:
     raise newException(FontError, "CFF font has no charstrings")
-  discard f.data.readIndex(cff + int(top[17][0]), f.cff.charStrings)
+  discard f.data.readIndex(cff + f.data.dictInt(top[17][0]), f.cff.charStrings)
   if 18 in top and top[18].len >= 2:
-    let privSize = int(top[18][0])
-    let privOffset = cff + int(top[18][1])
+    let privSize = f.data.dictInt(top[18][0])
+    let privOffset = cff + f.data.dictInt(top[18][1])
     let priv = f.data.readDict(privOffset, privSize)
     if 19 in priv and priv[19].len > 0:
-      discard f.data.readIndex(privOffset + int(priv[19][0]), f.cff.localSubrs)
+      discard
+        f.data.readIndex(privOffset + f.data.dictInt(priv[19][0]), f.cff.localSubrs)
 
 func bias(subrs: seq[(int, int)]): int =
   if subrs.len < 1240:
@@ -533,7 +628,7 @@ type CharstringState = object
   nStems: int
   widthParsed: bool
   open: bool
-  trans: seq[float64]
+  ended: bool ## Set by `endchar`, which ends the glyph from any subroutine depth.
   depth: int
 
 proc moveTo(s: var CharstringState, dx, dy: float64) =
@@ -586,7 +681,7 @@ proc runCharstring(f: ParsedFont, s: var CharstringState, start, length: int) =
         s.stack.add float64(-(b0 - 251) * 256 - f.data.u8(pos) - 108)
         inc pos
       else:
-        s.stack.add f.data.u32(pos).float64 / 65536.0
+        s.stack.add f.data.fixed(pos)
         pos += 4
       if s.stack.len > 48:
         raise newException(FontError, "charstring stack overflow")
@@ -725,9 +820,9 @@ proc runCharstring(f: ParsedFont, s: var CharstringState, start, length: int) =
       inc s.depth
       f.runCharstring(s, subrs[index][0], subrs[index][1])
       dec s.depth
-      if s.trans.len > 0:
-        # A `return` from the subroutine; `endchar` inside one ends all.
-        s.trans.setLen(0)
+      if s.ended:
+        # `endchar` in the subroutine, or in one it called: every level
+        # returns, up to the glyph's own charstring.
         return
     of 11: # return
       return
@@ -737,7 +832,7 @@ proc runCharstring(f: ParsedFont, s: var CharstringState, start, length: int) =
         s.path.closePath()
         s.open = false
       s.stack.setLen(0)
-      s.trans.add 1
+      s.ended = true
       return
     of 12:
       let b1 = f.data.u8(pos)
@@ -907,6 +1002,15 @@ proc readPairPos(data: Bytes, at: int): PairLookup =
     result.class2 = data.readClassDef(at + data.u16(at + 10))
     let class1Count = data.u16(at + 12)
     result.class2Count = data.u16(at + 14)
+    # Both counts come from the font, so the records have to fit in it
+    # before anything is allocated for them. A row is at most 65535 records
+    # of 32 bytes, so it fits in `int` everywhere, and once the rows fit, so
+    # does the record count. Without x advances every pair adjusts by 0,
+    # which an empty list gives too.
+    if (vf1 and 4) == 0:
+      return
+    let rowSize = result.class2Count * recordSize
+    data.checkArray(at + 16, class1Count, rowSize)
     result.advances = newSeq[int](class1Count * result.class2Count)
     for i in 0 ..< result.advances.len:
       result.advances[i] = data.xAdvance(at + 16 + i * recordSize, vf1)
@@ -957,7 +1061,7 @@ proc readKerning(f: ParsedFont) =
       var kind = lookupType
       if kind == 9:
         kind = f.data.u16(sub + 2)
-        sub = sub + f.data.u32(sub + 4)
+        sub = sub + f.data.offset32(sub + 4)
       if kind == 2:
         subtables.add f.data.readPairPos(sub)
     if subtables.len > 0:
