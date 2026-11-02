@@ -1,11 +1,13 @@
 # Writing a backend
 
-A backend is a type with the ten procs of [`RenderContext`](context.md). It can live in pollock's repository or in a package of its own; nothing in pollock needs to know about it.
+A backend is a type with the eleven procs of [`RenderContext`](context.md). It can live in pollock's repository or in a package of its own; nothing in pollock needs to know about it.
 
 ## The shape of it
 
 ```nim
 import pollock/context
+
+importTextEngine() # the default text engine, for `drawGlyphs`
 
 type
   MyState = object
@@ -13,14 +15,20 @@ type
     transform: Affine
     clip: MyClip # however the native API represents a clip
 
-  MyContext* = object
+  MyContextOf*[E] = object
+    engine*: E # the text engine whose glyphs it draws
     state: MyState
     stack: seq[MyState]
     error: string
     # ... whatever the native API needs
 
+  MyContext* = MyContextOf[typeof(defaultTextEngine())]
+
+proc newMyContext*[E](..., engine: E): MyContextOf[E] =
+  MyContextOf[E](engine: engine, state: MyState(transform: affineIdentity))
+
 proc newMyContext*(...): MyContext =
-  MyContext(state: MyState(transform: affineIdentity))
+  newMyContext(..., defaultTextEngine())
 
 proc clear*(ctx: var MyContext, color: Color) = ...
 proc fillPath*(ctx: var MyContext, path: BezPath, paint: Paint, rule: FillRule) = ...
@@ -34,6 +42,8 @@ proc transform*(ctx: var MyContext, affine: Affine) =
   ctx.state.transform = ctx.state.transform * affine
 proc currentTransform*(ctx: MyContext): Affine = ctx.state.transform
 proc drawImage*(ctx: var MyContext, image: ImageData, dst: Rect, interp: Interpolation) = ...
+proc drawGlyphs*[E](ctx: var MyContextOf[E], run: GlyphRun, paint: Paint) =
+  ctx.drawGlyphsAsPaths(ctx.engine, run, paint) # or draw natively, see below
 proc finish*(ctx: var MyContext): RenderResult =
   if ctx.error.len > 0: failure(ctx.error) else: success()
 
@@ -41,11 +51,19 @@ static:
   doAssert MyContext is RenderContext
 ```
 
+(The other procs take `ctx: var MyContextOf[E]` with an `[E]` on the proc as well; they are shown without it for brevity.)
+
 Keep the transform and the clip together in one state object, and save and restore that object whole. Saving only the transform is an easy mistake: a clip set inside `withClip` would then stay in force after the block ends. If the native API has its own save and restore (`cairo_save`, `CGContextSaveGState`), call it from `save` and `restore` as well.
 
 The `static` assertion at the end is worth keeping: it turns a missing or mistyped proc into a compile error in the backend's own module, with a message about the concept, instead of an error at some call site in a user's program.
 
 Export your constructor and anything the user needs to get the result out (`toImage`, `toSvg`, a `present`). Keep the primitives themselves exported too; the concept needs to see them.
+
+## Text
+
+The context is generic over the [text engine](text.md) it draws for, so that the engine is known at compile time: `importTextEngine()` brings in the module named by `-d:pollockTextEngine` (the pure Nim engine by default), `typeof(defaultTextEngine())` is its engine type, and the plain `MyContext` is the pairing with it. A backend that keeps no engine of its own can leave all of that out, as the recording backend does, as long as it still has a `drawGlyphs`.
+
+`drawGlyphs` gets a run and a paint. The simplest implementation, and the right one for a renderer without native glyph drawing, is `drawGlyphsAsPaths(ctx, ctx.engine, run, paint)` from `pollock/context`: it asks the engine for each glyph's drawing (an outline, color layers or a bitmap, in em units, cached on the font), scales it by the run's size, moves it to the glyph's position and draws it with `fillPath` and `drawImage`. A backend with native text makes a native font from `run.font.data` (and `index`), caches it keyed by the `Font`, and draws the glyph ids at their positions itself, unhinted and with grayscale antialiasing so it matches the reference; `when E is SomeEngine` can pick a native path for one engine and fall back for the others.
 
 ## What pollock gives you
 
@@ -58,6 +76,7 @@ You do not have to write a path flattener or a stroker:
 - `transform(affine, path)` and `affine.maxScale` convert between user and device space; the CPU backend divides its device-space tolerance by `maxScale` (the largest stretch in any direction) to get a user-space one that holds along every axis.
 - `colorAt(stops, t)` and `applyExtend(t, extend)` evaluate gradients. A linear gradient with no length, or a radial one with no radius, paints its last stop everywhere, as SVG specifies.
 - `ImageData.convert(format)` converts pixel formats, and `pollock/png` reads and writes PNG.
+- `drawGlyphsAsPaths(ctx, engine, run, paint)` draws text through `fillPath` and `drawImage`, and `engine.cachedDrawing(font, glyph)` gives a glyph's outline for a backend that draws it some other way.
 
 If the native API has fast paths for simple shapes, check for them: `fillPath` receives a `BezPath`, and `path.elements` makes an axis-aligned rectangle easy to recognize (a move, three lines and a close).
 
@@ -101,6 +120,8 @@ for i, name in sampleNames:
   doAssert ctx.finish().ok
   # save the result as name.png and look at it
 ```
+
+`drawTextSample(ctx, trueType, cff)` is the text scene; it takes the TrueType and CFF forms of Source Sans 3, which `nimble fonts` in a checkout of pollock downloads into `tests/fonts/`, and its golden is `text.png`.
 
 If the backend can hand back pixels, compare them with the CPU backend's goldens in `tests/golden/cpu/` using `compareImages(a, b, tolerance)` from `pollock/testing`. Antialiasing differs between renderers, so expect to allow a few levels of difference along edges; large differences mean something is wrong. The Cairo backend's test (`tests/tcairo.nim`) does this with a tolerance of 32 levels and allows 0.5% of the pixels to exceed it, which covers edge antialiasing and dash phases on curves while a missing or misplaced shape still fails.
 

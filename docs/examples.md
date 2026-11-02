@@ -1,6 +1,6 @@
 # Examples
 
-The `examples/` directory has five interactive scenes that run live in a native window. Each one is ordinary pollock drawing code, generic over `RenderContext`, so the same scene draws through the CPU backend, through Cairo, or into an SVG file.
+The `examples/` directory has six interactive scenes that run live in a native window. Each one is ordinary pollock drawing code, generic over `RenderContext`, so the same scene draws through the CPU backend, through Cairo, or into an SVG file.
 
 pollock itself never opens windows. The example window gets one from [SDL3](https://libsdl.org) through the official [`sdl3`](https://github.com/nim-lang/sdl3) Nim package, draws each frame with a pollock backend into pixels, and hands them to SDL as a texture.
 
@@ -22,21 +22,21 @@ Then, from a checkout of pollock:
 nimble window
 ```
 
-The first run calls `nimble setup`, which fetches the `sdl3` package at the version pinned in `nimble.lock` and writes `nimble.paths` so the compiler finds it. The `sdl3` package is a development dependency: installing pollock as a library doesn't pull it in.
+The first run calls `nimble setup`, which fetches the `sdl3` package at the version pinned in `nimble.lock` and writes `nimble.paths` so the compiler finds it. The `sdl3` package is a development dependency: installing pollock as a library doesn't pull it in. Every run also makes sure the font the lettering scene embeds is in `tests/fonts/`, downloading it the first time (see [test fonts](development.md#test-fonts)).
 
-To start on a particular scene, run the program directly and name it:
+To start on a particular scene, run the program directly and name it (after `nimble fonts`, if `nimble window` hasn't run yet):
 
 ```sh
 nim r -d:release examples/window.nim gears
 ```
 
-The scenes are `orrery`, `fireworks`, `beziers`, `gears` and `flowfield`.
+The scenes are `orrery`, `fireworks`, `beziers`, `gears`, `flowfield` and `lettering`.
 
 ### Keys
 
 | Key | Action |
 | --- | --- |
-| 1 to 5, Left, Right | Switch scenes. |
+| 1 to 6, Left, Right | Switch scenes. |
 | Space | Pause. |
 | R | Restart the scene. |
 | H | Toggle between drawing at the window's size in points and drawing every pixel of a high-density screen. |
@@ -57,6 +57,8 @@ The title bar shows what the pointer does in the current scene, the backend, the
 **Gears** (`gears.nim`). A train of seven meshing gears. Drag any gear to turn the whole train; let go and it keeps spinning, then settles back to its idle speed. The teeth are generated paths with quadratic curves at the tips and roots, the axle holes and spoke windows are cut with the even-odd fill rule, and each gear's path is transformed in user space so its lighting gradient stays put while the gear turns. Each gear's angle is a linear function of the driving gear's, worked out when the train is built so the teeth interlock.
 
 **Flow field** (`flowfield.nim`). Particles drift through a slowly changing field, each leaving a trail that fades from tail to head with a linear gradient and takes its color from the direction of travel. The pointer stirs a whirlpool into the field, and holding the button turns it into a drain.
+
+**Lettering** (`lettering.nim`). A word set from Source Sans 3's TrueType file (the [test font](development.md#test-fonts), embedded with `staticRead`), with the layout's baseline, ascent and descent drawn around it and a tick at the start of every glyph's advance, so the kerning shows (compare "AVATAR" with "pollock"). Each glyph is drawn as a run of its own through `drawGlyphs`, which is what lets it ride a slow wave and rise and grow when the pointer comes near, like a dock; a magnified glyph also shows the bounding box of the outline the engine gave. Clicking cycles through a few words, including accented letters, which are composite glyphs in the font. The caption and the numbers below are plain `drawText`.
 
 ## How it fits together
 

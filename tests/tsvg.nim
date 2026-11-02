@@ -106,6 +106,19 @@ suite "svg backend":
     check "fill=\"url(#g1)\"" in doc
     check "fill=\"url(#g2)\"" in doc
 
+  test "the same gradient is defined once":
+    var ctx = newSvgContext(10, 10)
+    let paint = linearGradient(point(0, 0), point(10, 0), red, blue)
+    ctx.fill(rect(0, 0, 5, 5), paint)
+    ctx.fill(rect(5, 5, 10, 10), paint)
+    ctx.stroke(
+      line(0, 0, 10, 10), linearGradient(point(0, 0), point(10, 0), red, green)
+    )
+    let doc = ctx.toSvg
+    check doc.count("<linearGradient") == 2
+    check doc.count("url(#g1)") == 2
+    check "stroke=\"url(#g2)\"" in doc
+
   test "clips open groups that restore closes":
     var ctx = newSvgContext(10, 10)
     ctx.withClip(circle(5, 5, 5)):

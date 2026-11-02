@@ -1,7 +1,7 @@
 ## Every example scene behind one type, so a host can switch between them
 ## at run time.
 
-import ./[scene, orrery, fireworks, beziers, gears, flowfield]
+import ./[scene, orrery, fireworks, beziers, gears, flowfield, lettering]
 
 export scene
 
@@ -12,6 +12,7 @@ type
     skBeziers
     skGears
     skFlowField
+    skLettering
 
   Scene* = object
     case kind*: SceneKind
@@ -20,6 +21,7 @@ type
     of skBeziers: beziers: Beziers
     of skGears: gears: Gears
     of skFlowField: flowField: FlowField
+    of skLettering: lettering: Lettering
 
 func name*(kind: SceneKind): string =
   ## A short lowercase name, for the command line and file names.
@@ -29,6 +31,7 @@ func name*(kind: SceneKind): string =
   of skBeziers: "beziers"
   of skGears: "gears"
   of skFlowField: "flowfield"
+  of skLettering: "lettering"
 
 func title*(kind: SceneKind): string =
   case kind
@@ -37,6 +40,7 @@ func title*(kind: SceneKind): string =
   of skBeziers: "Bezier curves"
   of skGears: "Gears"
   of skFlowField: "Flow field"
+  of skLettering: "Lettering"
 
 func hint*(kind: SceneKind): string =
   ## What the pointer does, for a host to show.
@@ -46,8 +50,9 @@ func hint*(kind: SceneKind): string =
   of skBeziers: "drag the control points"
   of skGears: "drag a gear to turn the train, let go to fling it"
   of skFlowField: "move to stir, hold the button to drain"
+  of skLettering: "move along the word to magnify it, click for another word"
 
-func newScene*(kind: SceneKind): Scene =
+proc newScene*(kind: SceneKind): Scene =
   case kind
   of skOrrery:
     Scene(kind: skOrrery, orrery: newOrrery())
@@ -59,6 +64,8 @@ func newScene*(kind: SceneKind): Scene =
     Scene(kind: skGears, gears: newGears())
   of skFlowField:
     Scene(kind: skFlowField, flowField: newFlowField())
+  of skLettering:
+    Scene(kind: skLettering, lettering: newLettering())
 
 proc update*(s: var Scene, dt: float64, input: Input) =
   case s.kind
@@ -72,6 +79,8 @@ proc update*(s: var Scene, dt: float64, input: Input) =
     s.gears.update(dt, input)
   of skFlowField:
     s.flowField.update(dt, input)
+  of skLettering:
+    s.lettering.update(dt, input)
 
 proc render*[C: RenderContext](s: Scene, ctx: var C) =
   case s.kind
@@ -85,3 +94,5 @@ proc render*[C: RenderContext](s: Scene, ctx: var C) =
     s.gears.render(ctx)
   of skFlowField:
     s.flowField.render(ctx)
+  of skLettering:
+    s.lettering.render(ctx)

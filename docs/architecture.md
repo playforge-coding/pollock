@@ -10,6 +10,9 @@ flowchart TD
   app --> ctx
   hl --> ctx[pollock/context: RenderContext concept]
   ctx --> geo[pollock/geometry, color, paint, stroke, image]
+  ctx --> text[pollock/text: TextEngine concept]
+  text -.implemented by.-> ot[engines/opentype]
+  cpu --> text
   ctx -.implemented by.-> cpu[backends/cpu]
   ctx -.implemented by.-> svg[backends/svg]
   ctx -.implemented by.-> rec[recording]
@@ -22,7 +25,8 @@ flowchart TD
 ```
 
 - The **value types** know nothing about backends: `geometry` (points, rectangles, shapes, affine transforms, Bezier paths with arcs, flattening, exact bounding boxes), `color`, `paint`, `stroke` (styles and stroke expansion) and `image`.
-- `context` defines the `RenderContext` concept, the ten primitives every backend implements, and re-exports the value types so a backend imports one module.
+- `text` holds the text value types (`Font`, `GlyphRun`, `GlyphDrawing`, `TextLayout`) and the `TextEngine` concept; engines under `engines/` implement it, `opentype` being the pure Nim one.
+- `context` defines the `RenderContext` concept, the eleven primitives every backend implements, the fallback that draws glyph runs with `fillPath` and `drawImage`, and re-exports the value types so a backend imports one module.
 - `draw` is the high-level API, generic over any `RenderContext`. It is the only layer most users touch.
 - Backends implement the concept. Each one is a module under `backends/`, except `recording`, which is part of the core because tests of the high-level API need it.
 - `samples` and `testing` exist for conformance: scenes every backend renders, and image comparison.
@@ -85,9 +89,9 @@ Nim compiles to C, C++, Objective-C and JavaScript. Everything in `src/` except 
 - Unsigned integer arithmetic behaves the same on JavaScript as on the native targets, as do the `shl` and `shr` operators on `uint32`, so checksums and bit readers are fine to write plainly.
 - `int` is 32 bits on JavaScript for range and overflow checks. Converting a `uint32` above 2^31 - 1 to `int` raises there, so check the unsigned value first, and compute sizes that could be large in `float64`. `png.nim` does both for the image dimensions.
 
-## Text (planned)
+## Text
 
-None of this is written yet. It is the design, settled first so that the text code and the backends can be built independently of each other.
+The first slice is built: the `TextEngine` concept, `Font`, `GlyphRun` and `GlyphDrawing` in `pollock/text`, the `drawGlyphs` primitive with its outline fallback, `drawText`, and the pure Nim engine with TrueType and CFF outlines, the character map, metrics and pair kerning, laying out one line of left-to-right text. This section is the design for the whole, settled first so that the text code and the backends could be built independently of each other; what isn't there yet is marked as planned.
 
 ### Layout and drawing are separate
 
@@ -111,16 +115,17 @@ flowchart LR
 
 ### The pieces
 
-- **`TextEngine`**, a concept in `pollock/text`. An engine loads fonts from bytes and builds a `TextLayout` from a string with ranged attributes (family, size, weight, style, paint and so on). For a layout, it answers with the glyph runs, line metrics and hit testing. For any glyph, it gives a `GlyphDrawing` (below). The concept is kept as small as `RenderContext` and grows by the same rule, only when every engine can implement the addition.
-- **`GlyphRun`**: the engine's handle for a font, the size, the paint, and the glyphs as (id, x, y) in user space, with y on the baseline. The font handle resolves to the font's bytes, face index and variation coordinates. A layout splits its runs wherever the font, the size or the paint changes, so each run has exactly one paint, the one its range of the text was given.
-- **`GlyphDrawing`**: what one glyph looks like, as a case object over `GlyphKind`. `gkOutline` holds a `BezPath`. `gkLayers` holds a list of outlines, each with its own `Paint` or a flag that says to use the run's paint (the COLR "foreground color"). `gkBitmap` holds an `ImageData` and the rectangle it covers. Paths and rectangles are in font units, and the drawing code scales them by the run's size.
-- **One new primitive**, `drawGlyphs(ctx, run, paint)`. The paint is passed explicitly, like every other paint in the contract, so code can draw a run in another paint (a shadow, a highlight). A helper in `draw` draws a whole layout at a point, calling the primitive for each run with that run's own paint.
-- **Backends are generic over the engine.** The context keeps the engine it was made with (shared with the layouts and any other contexts) so it can ask for outlines. Each pairing gets a type alias, and `CpuContext` keeps meaning the all-Nim one. Because the engine is a type parameter, a backend picks its native path at compile time: `when T is PangoEngine` in the Cairo backend can draw Pango's runs through `pango_cairo_show_glyph_string`.
-- **A second define**, `pollockTextEngine`, next to `pollockBackend`, picks the engine for the default context that `import pollock` exports.
+- **`TextEngine`**, a concept in `pollock/text`, with two procs: `layout(text, style)` builds a `TextLayout` and `glyphDrawing(font, glyph)` describes a glyph (below). Today a style is one font, size and paint and a layout is one line with its runs and metrics; ranged attributes, line breaking and hit testing are planned additions to the layout, not to the concept. The concept is kept as small as `RenderContext` and grows by the same rule, only when every engine can implement the addition.
+- **`Font`**: the font's bytes, a face index and variation coordinates, made with `newFont` and never parsed by pollock itself. An engine parses it on first use and keeps the result in the font's `cache` slot (a `RootRef` it can give any type), and the glyph drawings it makes go in the font's `drawings` table. So a font is shared by every layout and context that uses it, and nothing is keyed by an engine-specific id.
+- **`GlyphRun`**: a font, the size, the paint, and the glyphs as (id, position, cluster), with positions in user space and y on the baseline. A layout splits its runs wherever the font, the size or the paint changes, so each run has exactly one paint, the one its range of the text was given.
+- **`GlyphDrawing`**: what one glyph looks like, as a case object over `GlyphKind`. `gkOutline` holds a `BezPath`. `gkLayers` holds a list of outlines, each with its own `Paint` or a flag that says to use the run's paint (the COLR "foreground color"). `gkBitmap` holds an `ImageData` and the rectangle it covers. Paths and rectangles are in em units with y down and the baseline at 0, so the drawing code scales them by the run's size and nothing else.
+- **One new primitive**, `drawGlyphs(ctx, run, paint)`. The paint is passed explicitly, like every other paint in the contract, so code can draw a run in another paint (a shadow, a highlight). `drawText` in `draw` draws a whole layout at a point, calling the primitive for each run with that run's own paint.
+- **Backends are generic over the engine.** `CpuContextOf[E]` keeps the engine it was made with in `engine`, so `drawGlyphs` can ask it for outlines; `CpuContext` is the alias for the pairing with the default engine, the all-Nim one, and `newCpuContext(width, height, engine)` makes any other pairing. The SVG and Cairo backends have the same shape; the recording backend keeps no engine, since it records runs without drawing. Because the engine is a type parameter, a backend picks its native path at compile time: `when E is PangoEngine` in the Cairo backend will draw Pango's runs through `pango_cairo_show_glyph_string`.
+- **A second define**, `pollockTextEngine`, next to `pollockBackend`, names the engine module the backends pair with by default. `importTextEngine()` in `pollock/text` imports and exports it, and the module has to export `defaultTextEngine()`, whose type the aliases are built from.
 
 ### Drawing a run
 
-Every backend can draw a run without native text support. It asks the engine for each glyph's `GlyphDrawing` and draws it with primitives it already has: an outline with `fillPath` in the paint given to `drawGlyphs`, each layer with `fillPath` in the layer's paint (or the given one), and a bitmap with `drawImage` into its rectangle. A shared cache in pollock keeps the drawings in font units, keyed by font and glyph id, and scales them per run. That fallback is why `drawGlyphs` can be part of the concept from the first release: every backend, the recording one included, can implement it.
+Every backend can draw a run without native text support. `drawGlyphsAsPaths` in `pollock/context` asks the engine for each glyph's `GlyphDrawing` (through `cachedDrawing`, which keeps it on the font) and draws it with primitives the backend already has: an outline with `fillPath` in the paint given to `drawGlyphs`, each layer with `fillPath` in the layer's paint (or the given one), and a bitmap with `drawImage` into its rectangle. Each drawing is transformed by `translate(position) * scale(size)` before the call rather than through the context's transform, so the paint stays in user space and a gradient runs across the line instead of restarting at every glyph. That fallback is why `drawGlyphs` could be part of the concept from the start: every backend can implement it, and the CPU, SVG and Cairo backends all use it today.
 
 A backend with native glyph drawing uses it when it can make a native font from the run's font bytes:
 
@@ -134,9 +139,13 @@ A backend with native glyph drawing uses it when it can make a native font from 
 | WebGL2 | Outlines rasterized into a glyph atlas texture. |
 | Recording | Records the run. |
 
-Color glyphs (emoji and other color fonts) aren't plain outlines, which is what the layer and bitmap kinds of `GlyphDrawing` are for. COLRv0 glyphs become `gkLayers` with solid paints. sbix and CBDT glyphs become `gkBitmap`, with the engine picking the bitmap strike closest to the run's size. COLRv1 adds gradients, including sweep gradients, and blend modes. Its linear and radial gradients map onto pollock's paints, but pollock has neither sweep gradients nor blend modes yet, so until it does an engine gives a COLRv1 glyph that needs them as its plain outline (`gkOutline`). Glyphs stored as SVG documents are not planned. A backend that draws color glyphs natively (Core Text, DirectWrite's color glyph runs) may do so instead of the fallback.
+Of these, the CPU, SVG and Cairo rows are built (Cairo through the fallback for now), and the recording backend records.
+
+Color glyphs (emoji and other color fonts) aren't plain outlines, which is what the layer and bitmap kinds of `GlyphDrawing` are for; the pure Nim engine doesn't produce them yet. COLRv0 glyphs become `gkLayers` with solid paints. sbix and CBDT glyphs become `gkBitmap`, with the engine picking the bitmap strike closest to the run's size. COLRv1 adds gradients, including sweep gradients, and blend modes. Its linear and radial gradients map onto pollock's paints, but pollock has neither sweep gradients nor blend modes yet, so until it does an engine gives a COLRv1 glyph that needs them as its plain outline (`gkOutline`). Glyphs stored as SVG documents are not planned. A backend that draws color glyphs natively (Core Text, DirectWrite's color glyph runs) may do so instead of the fallback.
 
 ### Contract additions
+
+These are in the [contract](context.md#the-rules) now:
 
 - Glyph positions are in user space, and the transform applies to them as it does to a path.
 - A font is its bytes, face index and variation coordinates, never a system handle, so any backend can build its own native font from it.
@@ -167,7 +176,7 @@ Where each one runs:
 
 ### Where the code lives
 
-- In pollock: the `TextEngine` concept, `GlyphRun`, `GlyphDrawing` and the glyph cache in `pollock/text`, and the engines under `pollock/engines/`: `opentype` (pure Nim, the default), `pango`, `coretext` and `directwrite`. The native engines follow the rules for native backends: their own define and guarded test file, a `nimble` task, and nothing in the core imports them.
+- In pollock: the `TextEngine` concept, `Font`, `GlyphRun`, `GlyphDrawing` and the glyph cache in `pollock/text`, the fallback `drawGlyphsAsPaths` in `pollock/context`, and the engines under `pollock/engines/`: `opentype` (pure Nim, the default, built), and `pango`, `coretext` and `directwrite` (planned). The native engines follow the rules for native backends: their own define and guarded test file, a `nimble` task, and nothing in the core imports them.
 - In separate packages, because they need Rust: `pollock-parley` (an engine), `pollock-tinyskia` and `pollock-vellocpu` (backends). Each has a small crate that exposes a C ABI over the library: opaque handles that Nim frees from `=destroy`, plain `repr(C)` types at the boundary, coarse calls (a whole layout in, flat arrays of runs out), and no unwinding across it (`panic = "abort"`, or `catch_unwind` turned into a status code that `finish` reports). cbindgen writes the C header from `build.rs`, the Nim bindings use it through `importc` and `header`, as the Cairo backend does with `cairo.h`, and the package's `nimble` tasks run `cargo build` first.
 
 ### The CPU family
@@ -176,15 +185,17 @@ The pure Nim renderer, tiny-skia and vello_cpu all render into memory and read t
 
 ### Testing text
 
-The reference pairing, the CPU backend with the pure Nim engine, gets exact goldens for text samples drawn with an openly licensed font kept in `tests/`. Every other pairing is compared with those goldens at a tolerance, the way `tcairo` compares Cairo today, looser for text than for shapes. CI runs the pairings whose libraries install on each platform.
+The reference pairing, the CPU backend with the pure Nim engine, has exact goldens for the text scene (`drawTextSample` in `pollock/samples`, drawn with Source Sans 3 in both its TrueType and its CFF form, checked by `ttext`). The fonts are downloaded at a pinned tag and checked against pinned sums rather than committed (see [test fonts](development.md#test-fonts)). Every other pairing is compared with those goldens at a tolerance, the way `tcairo` compares Cairo, and CI runs the pairings whose libraries install on each platform. The engine's own parsing is checked against the font's known metrics and against kerned widths measured with HarfBuzz, and its parsers one at a time (a format 12 character map, charstring subroutines and flex) against hand-built bytes in `topentype`.
 
 ### The pure Nim engine
 
-It covers OpenType parsing (`cmap`, `glyf`, CFF and CFF2 outlines, metrics, variations), the Unicode bidirectional algorithm (UAX 9) and line breaking (UAX 14), with the Unicode data generated into Nim tables, and shaping. Fonts come from the application as bytes; looking up installed fonts works off the JavaScript target only.
+Built: the table directory and collections, `head`, `hhea`, `hmtx`, `maxp`, `cmap` formats 4 and 12, `glyf` and `loca` outlines (simple and composite glyphs), CFF outlines (Type 2 charstrings with local and global subroutines, hints skipped, flex drawn) and pair kerning from `GPOS` (both pair adjustment formats, also behind extension lookups, from the `kern` feature of the Latin or default script; every lookup applies, and within one only the first subtable that covers the pair, as in HarfBuzz). Layout is one line, left to right, one glyph per character with the kerning applied. Everything is read with bounds checks that raise `FontError`, never a defect, so a corrupt file can't crash a program.
 
-Shaping is the one part that is hard to finish: Arabic joining, Indic reordering and the other complex scripts take years of work to get right. So it sits behind a seam of its own inside the engine. The engine takes a **shaper**, which turns a run of text in one font, script and direction into glyph ids with advances and offsets:
+Planned: CID-keyed CFF and CFF2 outlines, variations, the legacy `kern` table, the Unicode bidirectional algorithm (UAX 9) and line breaking (UAX 14) with the Unicode data generated into Nim tables, and shaping beyond kerning. Fonts come from the application as bytes; looking up installed fonts will work off the JavaScript target only.
 
-- **The Nim shaper**, the default. It applies GSUB and GPOS and starts with what Latin, Greek and Cyrillic need: ligatures, kerning and mark placement. Complex scripts come later.
+Shaping is the one part that is hard to finish: Arabic joining, Indic reordering and the other complex scripts take years of work to get right. So it will sit behind a seam of its own inside the engine, which today is just the kerning step in `layout`. The engine will take a **shaper**, which turns a run of text in one font, script and direction into glyph ids with advances and offsets:
+
+- **The Nim shaper**, the default. It applies GSUB and GPOS and starts with what Latin, Greek and Cyrillic need: ligatures, kerning (done) and mark placement. Complex scripts come later.
 - **HarfBuzz.** On `c`, `cpp` and `objc` it is the native library, found through `pkg-config` (it is installed wherever Pango is). On the JavaScript target it is [harfbuzzjs](https://github.com/harfbuzz/harfbuzzjs), HarfBuzz's own WebAssembly build, which runs in browsers and in Node, so `nimble testjs` can test it. Both take the font's bytes, so the engine's fonts and runs stay the same whichever shaper is used.
 
 Once the HarfBuzz shaper is written, the pure Nim engine will handle every script on every target, and the Nim shaper can take over script by script as it grows. The application will load harfbuzzjs itself and pass the instance in, so pollock keeps no dependencies on JS either. Instantiating WebAssembly is asynchronous, so on JS the engine will be made from an instance that is already loaded and will never wait inside a constructor. The shaper module will follow the rules for native code: its own define (`pollockHarfBuzz`), a test file that skips itself without it, and a `nimble` task that runs it under C, C++ and Objective-C and, with harfbuzzjs installed from npm, under JS.

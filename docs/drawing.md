@@ -131,6 +131,16 @@ proc drawImage(ctx, image, dst: Rect, interp: Interpolation)
 
 Draws the image at its natural size, or stretched into `dst`. `ipNearest` keeps pixels sharp, `ipBilinear` smooths them. The current transform and clip apply.
 
+## Text
+
+```nim
+proc drawText(ctx, layout: TextLayout, at: Point)
+proc drawText(ctx, layout: TextLayout, x, y: float64)
+template drawText(ctx, text: string, style: TextStyle, at: Point)
+```
+
+Draws laid-out text with the start of its baseline at `at`, each run in its own paint; the template lays the text out with the context's engine first. Fonts, styles, layouts and engines are described in [Text](text.md).
+
 ## Clearing and finishing
 
 `ctx.clear(color)` paints the whole target, ignoring the transform and the clip. `ctx.finish()` returns a `RenderResult` whose `ok` is false if any drawing call failed since the last `finish`; backends never raise from drawing calls.

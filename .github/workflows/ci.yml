@@ -64,6 +64,18 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install cairo
 
+      # The text tests and the lettering example embed fonts that aren't
+      # committed. The test tasks would fetch them too; doing it here first
+      # makes a failed download its own step, and the cache (keyed on the
+      # fetcher, which pins their sums) spares GitHub the repeat downloads.
+      - uses: actions/cache@v6
+        with:
+          path: tests/fonts
+          key: fonts-${{ hashFiles('tools/fetchfonts.nim') }}
+
+      - name: Fetch the test fonts
+        run: nimble -y fonts
+
       - name: Test (C target)
         run: nimble -y test
 

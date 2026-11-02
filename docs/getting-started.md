@@ -81,6 +81,22 @@ writePng(ctx.toImage(), "first-cairo.png")
 
 `newCairoContext` also accepts a pointer to a `cairo_t` you already have, so the same code can draw into a GTK widget.
 
+## Text
+
+Text needs a font file, which pollock reads itself (TrueType or CFF outlines):
+
+```nim
+import pollock
+
+var ctx = newCpuContext(320, 100)
+ctx.clear(white)
+let font = newFont(readFile("Inter-Regular.ttf"))
+ctx.drawText("Hello, pollock!", textStyle(font, 32), point(20, 60))
+writePng(ctx.toImage(), "hello.png")
+```
+
+The point is where the baseline starts. [Text](text.md) covers layouts, metrics and the engine behind it.
+
 ## Writing code that works with any backend
 
 Make the procedure generic over `RenderContext`:

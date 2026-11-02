@@ -16,10 +16,14 @@
 ##   reports it from `finish`.
 ## - `save` and `restore` cover the transform and the clip, nothing else.
 ## - `clear` paints the whole target, ignoring the transform and the clip.
+## - `drawGlyphs` draws a run in the paint it is given; the positions are in
+##   user space, so the transform applies to them like to a path. A backend
+##   that can't make a native font from the run's bytes draws the engine's
+##   outlines with `drawGlyphsAsPaths`.
 
-import ./[color, geometry, image, paint, stroke]
+import ./[color, geometry, image, paint, stroke, text]
 
-export color, geometry, image, paint, stroke
+export color, geometry, image, paint, stroke, text
 
 type
   FillRule* = enum
@@ -46,6 +50,7 @@ type
     proc transform(ctx: var Self, affine: Affine)
     proc currentTransform(ctx: Self): Affine
     proc drawImage(ctx: var Self, image: ImageData, dst: Rect, interp: Interpolation)
+    proc drawGlyphs(ctx: var Self, run: GlyphRun, paint: Paint)
     proc finish(ctx: var Self): RenderResult
 
 func success*(): RenderResult =
@@ -53,3 +58,27 @@ func success*(): RenderResult =
 
 func failure*(message: string): RenderResult =
   RenderResult(ok: false, message: message)
+
+proc drawGlyphsAsPaths*[C, E](ctx: var C, engine: E, run: GlyphRun, paint: Paint) =
+  ## Draws a glyph run with the primitives every backend has: outlines and
+  ## color layers with `fillPath`, bitmaps with `drawImage`. The engine's
+  ## drawings are in em units and cached on the font; each one is scaled
+  ## by the run's size and moved to its glyph's position, so the paint
+  ## stays in user space. Backends without native glyph drawing call this
+  ## from their `drawGlyphs`.
+  mixin fillPath, drawImage
+  if run.font == nil or run.size <= 0:
+    return
+  for g in run.glyphs:
+    let drawing = engine.cachedDrawing(run.font, g.id)
+    let m = translate(g.pos.toVec) * scale(run.size)
+    case drawing.kind
+    of gkOutline:
+      if not drawing.path.isEmpty:
+        ctx.fillPath(m.transform(drawing.path), paint, frNonZero)
+    of gkLayers:
+      for layer in drawing.layers:
+        let layerPaint = if layer.usesRunPaint: paint else: layer.paint
+        ctx.fillPath(m.transform(layer.path), layerPaint, frNonZero)
+    of gkBitmap:
+      ctx.drawImage(drawing.image, m.transform(drawing.bounds), ipBilinear)

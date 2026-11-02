@@ -66,6 +66,25 @@ proc drawImage*[C: RenderContext](ctx: var C, image: ImageData, dst: Rect) =
   mixin drawImage
   ctx.drawImage(image, dst, ipBilinear)
 
+proc drawText*[C: RenderContext](ctx: var C, layout: TextLayout, at: Point) =
+  ## Draws laid-out text with the start of its baseline at `at`, each run
+  ## in its own paint.
+  mixin drawGlyphs
+  for run in layout.runs:
+    var moved = run
+    for g in moved.glyphs.mitems:
+      g.pos = g.pos + at.toVec
+    ctx.drawGlyphs(moved, run.paint)
+
+proc drawText*[C: RenderContext](ctx: var C, layout: TextLayout, x, y: float64) =
+  ctx.drawText(layout, point(x, y))
+
+template drawText*(ctx: untyped, text: string, style: TextStyle, at: Point) =
+  ## Lays `text` out with the context's engine and draws it. Needs a
+  ## context with an `engine`, which every backend but the recording one
+  ## has; `layout` raises `FontError` for a font the engine can't read.
+  ctx.drawText(ctx.engine.layout(text, style), at)
+
 template withSave*(ctx: untyped, body: untyped) =
   ## Runs `body` between `save` and `restore`.
   ctx.save()

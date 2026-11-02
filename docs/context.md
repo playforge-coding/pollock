@@ -13,6 +13,7 @@ type RenderContext* = concept
   proc transform(ctx: var Self, affine: Affine)
   proc currentTransform(ctx: Self): Affine
   proc drawImage(ctx: var Self, image: ImageData, dst: Rect, interp: Interpolation)
+  proc drawGlyphs(ctx: var Self, run: GlyphRun, paint: Paint)
   proc finish(ctx: var Self): RenderResult
 ```
 
@@ -44,6 +45,9 @@ The primitive names end in `Path` so they never collide with the shape-taking he
 `drawImage(image, dst, interp)`
 :   Draws `image` stretched into `dst`, under the transform and clip, with nearest or bilinear sampling.
 
+`drawGlyphs(run, paint)`
+:   Draws a glyph run (one font at one size, glyph ids with positions in user space) in `paint`, under the transform and clip. The paint is passed explicitly, like every other paint, so a run can be drawn in a paint other than its own (a shadow, a highlight); `drawText` in `pollock/draw` passes each run's own. A backend that can make a native font from the run's bytes draws natively; otherwise it calls `drawGlyphsAsPaths(ctx, engine, run, paint)`, which fills the engine's outlines and color layers with `fillPath` and its bitmaps with `drawImage`.
+
 `finish`
 :   Ends a frame. Returns a `RenderResult` with `ok` false and a `message` if any call failed since the last `finish`, and clears that state. Backends that draw to a window present the frame here.
 
@@ -57,9 +61,11 @@ These are the agreements every backend keeps, so that one drawing looks the same
 - **Drawing calls never raise.** A backend records the first failure and reports it from `finish`. Losing the device is one of those failures; the caller makes a new context.
 - **State is small.** `save` and `restore` cover the transform and the clip, nothing else.
 - **`clear` is absolute.** It ignores the transform and the clip, so it is safe to call at the top of every frame.
+- **Text is glyph runs.** Glyph positions are in user space, so the transform applies to them like to a path. A font is its bytes, face index and variation coordinates, never a platform handle, so any backend can build its own native font from it. Font lookup and fallback belong to the engine, not the backend. Glyphs are drawn unhinted with grayscale antialiasing, so every engine and backend pairing can be compared with the reference, the CPU backend with the pure Nim engine.
 
 ## Types
 
 - `FillRule`: `frNonZero`, `frEvenOdd`.
 - `Interpolation`: `ipNearest`, `ipBilinear`.
 - `RenderResult`: `ok: bool`, `message: string`. `success()` and `failure(message)` make them.
+- `GlyphRun`, `Glyph`, `GlyphId`, `Font`, `GlyphDrawing` and the `TextEngine` concept come from `pollock/text`, which the context re-exports; see [Text](text.md).

@@ -11,7 +11,7 @@
 ## exact rather than fast, and a high-density screen has four times the
 ## pixels. H switches to drawing every pixel.
 ##
-## Keys: 1 to 5 or the arrow keys switch scenes, space pauses, R restarts
+## Keys: 1 to 6 or the arrow keys switch scenes, space pauses, R restarts
 ## the scene, H toggles full pixel density, S saves the frame as PNG and SVG
 ## into `out/`, Escape quits. Built with `-d:pollockCairo` (`nimble window`
 ## does that when pkg-config finds Cairo), B switches between the CPU and

@@ -4,13 +4,15 @@ A backend is a type that satisfies [`RenderContext`](context.md). pollock ships 
 
 | Backend | Module | Target | Status |
 | --- | --- | --- | --- |
-| CPU | `pollock/backends/cpu` | any | done, no text |
-| SVG | `pollock/backends/svg` | any | done, no text |
-| Recording | `pollock/recording` | any | done |
-| Cairo | `pollock/backends/cairo` | C, C++ and Objective-C, where Cairo is installed | done, no text |
+| CPU | `pollock/backends/cpu` | any | done; text from the engine's outlines |
+| SVG | `pollock/backends/svg` | any | done; text as glyph paths |
+| Recording | `pollock/recording` | any | done; records glyph runs |
+| Cairo | `pollock/backends/cairo` | C, C++ and Objective-C, where Cairo is installed | done; text from the engine's outlines, native glyphs planned |
 | Core Graphics | `pollock/backends/coregraphics` | macOS | planned |
 | Direct2D | `pollock/backends/direct2d` | Windows | planned |
 | WebGL2 | `pollock/backends/webgl2` | browsers | planned |
+
+Every backend but the recording one is generic over its [text engine](text.md): `CpuContext` is `CpuContextOf[OpenTypeEngine]`, the pairing with the default engine, and `newCpuContext(width, height, engine)` makes a context over another engine; the same goes for `SvgContextOf` and `CairoContextOf`. `ctx.engine` is the engine a context was made with.
 
 ## CPU
 
@@ -30,6 +32,8 @@ let c = ctx.pixel(x, y)                  # one pixel as a Color
 
 How it draws: paths are transformed to device space (arcs stay arcs, so a transformed ellipse is exact) and flattened; the edges are accumulated into a signed-area coverage buffer (the method font rasterizers such as font-rs use), which gives exact antialiasing for non-overlapping edges; each covered pixel is then composited with source-over. Strokes are expanded into an outline by `pollock/stroke` and filled with the nonzero rule. Clips are coverage masks that multiply into later fills. Gradients and images are sampled per pixel by mapping the pixel center back to user space.
 
+Text is the engine's outlines, each glyph filled like any other path with the run's paint. It is the reference for text too: the text scene's golden is its output with the pure Nim engine.
+
 Known limits: where a path overlaps itself with the same winding direction, partially covered pixels along the overlap can come out slightly darker than ideal (coverage is clamped, not exact, there). Images are sampled without mipmaps, so shrinking an image a lot aliases.
 
 ## SVG
@@ -48,9 +52,11 @@ Each `fillPath` and `strokePath` becomes a `<path>` with the transform as a `mat
 
 Numbers are rounded to about seven significant digits, never more coarsely than to three decimal places, and trailing zeros are dropped (`1.2` stays `1.2`). That keeps transform coefficients like a scale of 0.0004 intact. A miter limit below 1, which SVG would ignore, is written as a bevel join, matching what such a limit means.
 
+Text is one `<path>` per glyph from the engine's outlines, so it looks the same in every viewer and needs no font there. A gradient used by several elements (every glyph of a line, say) is defined once in `<defs>`. `<text>` elements, which would make the text selectable at the price of the viewer doing its own layout, may come later as an option.
+
 ## Recording
 
-`pollock/recording` records the primitive calls into a `seq[Command]` instead of drawing. It exists for tests of code that draws, and as the smallest example of a backend.
+`pollock/recording` records the primitive calls into a `seq[Command]` instead of drawing. It exists for tests of code that draws, and as the smallest example of a backend. It records glyph runs as they are and needs no text engine.
 
 ```nim
 import pollock/[draw, recording]
@@ -91,7 +97,7 @@ Errors: Cairo's status is sticky, so the first failing call leaves the cairo_t u
 
 Differences from the CPU backend: antialiasing differs by a few levels along edges, and Cairo measures dash phases along the exact curve rather than the flattened polyline, so dash ends on curves can shift by a fraction of a pixel. The conformance test allows 0.5% of the pixels in each sample scene to differ by more than 32 levels, which the current samples stay well under. Gradients interpolate straight alpha, as the rules require; a test checks it. `clear` on a wrapped cairo_t also drops any clip the host had set, since `cairo_reset_clip` is the only way out of Cairo's clip; a draw handler that needs to keep the host's clip should fill a rectangle instead.
 
-Not supported yet: text. Once the text API exists, Cairo will draw Pango's glyph runs natively and fonts from the other engines through FreeType; see the [text design](architecture.md#text-planned).
+Text is drawn from the engine's outlines for now, like the CPU backend does. Native glyph drawing is planned: Pango's glyph runs through `pango_cairo_show_glyph_string` once the Pango engine exists, and fonts from the other engines through FreeType; see the [text design](architecture.md#text).
 
 ## Planned native backends
 
@@ -101,4 +107,4 @@ The [roadmap](roadmap.md) has the order. The plan for each, so that the shape of
 - **Direct2D**: COM calls through vtables, which work the same from C and C++, with DirectWrite for text and WIC for bitmaps.
 - **WebGL2**: shapes go through a shared GPU tessellation layer (flattened outlines to triangles, stencil-then-cover fills, batching), antialiasing through a multisampled renderbuffer, text from the pure Nim engine through a glyph atlas texture. The tessellation layer is meant to be reusable by a WebGPU backend.
 
-Text engines and backends will combine freely: any backend can draw the layout of any engine on the same platform, so Core Graphics can draw Parley's text and the CPU backend can draw Core Text's. The [text design](architecture.md#text-planned) has the full table.
+Text engines and backends combine freely: any backend can draw the layout of any engine on the same platform, so Core Graphics will draw Parley's text and the CPU backend Core Text's. The [text design](architecture.md#text) has the full table.
