@@ -2,7 +2,7 @@
 ## compiled with `-d:pollockCairo`; `nimble testcairo` does that.
 
 when defined(pollockCairo) and not defined(js):
-  import std/[os, strformat, unittest]
+  import std/[math, os, strformat, unittest]
   import pollock/[samples, testing, png]
   import pollock/backends/cairo
 
@@ -110,6 +110,25 @@ when defined(pollockCairo) and not defined(js):
       ctx.fill(path, black)
       check ctx.pixel(10, 15) == black
       check ctx.pixel(1, 1) == transparent
+
+    test "arcs are drawn":
+      var ctx = newCairoContext(20, 20)
+      var p = newPath()
+      p.moveTo 0, 10
+      p.arcTo(10.0, point(20, 10))
+      p.closePath()
+      ctx.fill(p, black)
+      check ctx.pixel(10, 5) == black
+      check ctx.pixel(10, 15) == transparent
+      var tilted = newPath()
+      tilted.moveTo 10, 0
+      tilted.arcTo(vec2(10, 4), PI / 2, false, true, point(10, 20))
+      tilted.closePath()
+      ctx.clear(transparent)
+      ctx.fill(tilted, black)
+      check ctx.pixel(12, 10) == black
+      check ctx.pixel(16, 10) == transparent
+      check ctx.pixel(8, 10) == transparent
 
     test "dashes with negative entries are clamped":
       var ctx = newCairoContext(20, 4)

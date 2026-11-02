@@ -279,6 +279,43 @@ suite "cpu backend":
     checkpoint($diff.differingPixels & " pixels differ")
     check diff.differingPixels < 30
 
+  test "a disc from arcs matches the circle":
+    # Flattened finely, so the chords of the two don't differ by a visible
+    # amount; what is left is the circle's four cubics, off the true circle
+    # by 0.03% of the radius.
+    var a = newCpuContext(60, 60)
+    a.tolerance = 0.005
+    a.fill(arc(point(30, 30), 20, 0, 2 * PI), black)
+    var b = newCpuContext(60, 60)
+    b.tolerance = 0.005
+    b.fill(circle(30, 30, 20), black)
+    check compareImages(a.toImage(), b.toImage(), tolerance = 4).differingPixels == 0
+
+  test "a half disc from an arc bulges clockwise":
+    var ctx = newCpuContext(20, 20)
+    var p = newPath()
+    p.moveTo 0, 10
+    p.arcTo(10.0, point(20, 10))
+    p.closePath()
+    ctx.fill(p, black)
+    check ctx.pixel(10, 5) == black
+    check ctx.pixel(10, 15).a == 0.0
+    check ctx.pixel(1, 1).a == 0.0
+
+  test "arcs follow the transform":
+    var ctx = newCpuContext(40, 20)
+    var p = newPath()
+    p.moveTo 0, 10
+    p.arcTo(5.0, point(10, 10))
+    p.closePath()
+    ctx.withTransform(scale(4, 1)):
+      ctx.fill(p, black)
+    # A 10-wide half disc becomes a 40-wide half ellipse, still 5 tall.
+    check ctx.pixel(20, 7) == black
+    check ctx.pixel(2, 9) == black
+    check ctx.pixel(20, 4).a == 0.0
+    check ctx.pixel(20, 12).a == 0.0
+
   test "fills in separate columns don't disturb each other":
     var ctx = newCpuContext(100, 10)
     ctx.clear(white)

@@ -11,8 +11,8 @@ Finished items stay in their section with a check mark, so each section shows ho
 - [x] The high-level API: `fill`, `stroke`, `clip`, transforms, `withSave`, `withTransform`, `withClip`, images.
 - [x] PNG reading and writing with no dependencies.
 - [x] Sample scenes and golden tests.
-- [ ] Arcs and elliptical arcs as path elements.
-- [ ] Exact bounding boxes for curves (today the box is around the control points).
+- [x] Arcs and elliptical arcs as path elements.
+- [x] Exact bounding boxes for curves.
 - [ ] Text: the `TextEngine` concept, `GlyphRun`, the `drawGlyphs` primitive, layouts with ranged attributes, hit testing. Engines and backends combine freely; see the [text design](architecture.md#text-planned). The API grows only as fast as every engine and backend can implement it.
 - [ ] A shared glyph cache, so every backend can draw text with the primitives it already has: outlines and color layers with `fillPath`, bitmap glyphs with `drawImage`.
 - [ ] Color glyphs: COLR layers, sbix and CBDT bitmaps.

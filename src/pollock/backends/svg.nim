@@ -61,6 +61,11 @@ func pathData(path: BezPath): string =
     of peCubicTo:
       result.add "C" & fmt(el.ctrl1.x) & " " & fmt(el.ctrl1.y) & " " & fmt(el.ctrl2.x) &
         " " & fmt(el.ctrl2.y) & " " & fmt(el.cubicEnd.x) & " " & fmt(el.cubicEnd.y)
+    of peArcTo:
+      # The same parameterization as SVG's, with the rotation in degrees.
+      result.add "A" & fmt(el.radii.x) & " " & fmt(el.radii.y) & " " &
+        fmt(radToDeg(el.rotation)) & " " & (if el.largeArc: "1" else: "0") & " " &
+        (if el.sweep: "1" else: "0") & " " & fmt(el.arcEnd.x) & " " & fmt(el.arcEnd.y)
     of peClosePath:
       result.add "Z"
 

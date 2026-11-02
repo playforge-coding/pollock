@@ -1,4 +1,4 @@
-import std/[strutils, unittest]
+import std/[math, strutils, unittest]
 import pollock/draw
 import pollock/backends/svg
 
@@ -56,6 +56,15 @@ suite "svg backend":
     ctx.fill(rect(0, 0, 1, 1), red.withAlpha(0.5), frEvenOdd)
     let doc = ctx.toSvg
     check "fill=\"#ff0000\" fill-opacity=\"0.5\" fill-rule=\"evenodd\"" in doc
+
+  test "arcs are written with the rotation in degrees":
+    var ctx = newSvgContext(20, 20)
+    var p = newPath()
+    p.moveTo 0, 10
+    p.arcTo(vec2(5, 3), PI / 2, true, false, point(10, 10))
+    p.arcTo(4.0, point(0, 10))
+    ctx.fill(p, black)
+    check "<path d=\"M0 10 A5 3 90 1 0 10 10 A4 4 0 0 1 0 10\"" in ctx.toSvg
 
   test "transform attribute":
     var ctx = newSvgContext(10, 10)
