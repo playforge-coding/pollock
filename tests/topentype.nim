@@ -252,6 +252,33 @@ suite "opentype internals":
     expect FontError:
       f.readKerning()
 
+  test "the kerning subtables kept are limited across all lookups":
+    # Two lookups that are one table, listing one small subtable 800 times.
+    # That fits the font's size, but every glyph pair would scan them all.
+    const subtables = 800
+    const scriptList = 10
+    const featureList = scriptList + 20
+    const lookupList = featureList + 16
+    var gpos = be16(1) & be16(0) & be16(scriptList) & be16(featureList)
+    gpos.add be16(lookupList)
+    gpos.add be16(1) & tagBytes("DFLT") & be16(8) # one script, at 8
+    gpos.add be16(4) & be16(0) # its default language system at 4, no others
+    gpos.add be16(0) & be16(0xFFFF) & be16(1) & be16(0) # just feature 0
+    gpos.add be16(1) & tagBytes("kern") & be16(8) # one feature, at 8
+    gpos.add be16(0) & be16(2) & be16(0) & be16(1) # lookups 0 and 1
+    gpos.add be16(2) & be16(6) & be16(6) # two lookups, both at 6
+    gpos.add be16(2) & be16(0) & be16(subtables) # pair adjustment
+    for i in 0 ..< subtables:
+      gpos.add be16(6 + subtables * 2)
+    gpos.add be16(1) & be16(10) & be16(4) & be16(0) & be16(0) # no pair sets
+    gpos.add be16(1) & be16(0) # coverage: no glyphs
+    let f = ParsedFont(data: gpos, tables: {"GPOS": (0, gpos.len)}.toTable)
+    f.readKerning()
+    check f.kerning.len == 2
+    check f.kerning[0].len == subtables
+    check f.kerning[1].len == maxKernSubtables - subtables
+    check f.kerning(GlyphId(1), GlyphId(2)) == 0
+
   test "subroutines that call subroutines are limited, not exponential":
     # Subroutine k calls subroutine k + 1 twenty times, and the last draws
     # a line: 20^8 lines from the first. Two levels draw; eight run out.

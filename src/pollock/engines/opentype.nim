@@ -1090,6 +1090,11 @@ func pairValue(data: Bytes, sub: PairLookup, a, b: int, value: var int): bool =
   value = data.xAdvance(pairSet + 4 + i * stride, sub.valueFormat)
   true
 
+const maxKernSubtables = 1 shl 10
+  ## Pair adjustment subtables kept across all kern lookups. Real fonts have a
+  ## few dozen to a few hundred, but every glyph pair in a layout scans them,
+  ## so the count can't be left to grow with the size of the font.
+
 proc readKerning(f: ParsedFont) =
   ## The pair adjustment lookups of the `kern` feature for the Latin script,
   ## or the default script.
@@ -1139,12 +1144,17 @@ proc readKerning(f: ParsedFont) =
       if not seenLookup[lookupIndex]:
         seenLookup[lookupIndex] = true
         lookups.add lookupIndex
+  var kept = 0
   for lookupIndex in lookups:
+    if kept >= maxKernSubtables:
+      break
     let lookup = lookupList + f.data.u16(lookupList + 2 + lookupIndex * 2)
     let lookupType = f.data.u16(lookup)
     let subCount = f.data.u16(lookup + 4)
     var subtables: seq[PairLookup]
     for i in 0 ..< subCount:
+      if kept >= maxKernSubtables:
+        break
       budget.spend(1)
       var sub = lookup + f.data.u16(lookup + 6 + i * 2)
       var kind = lookupType
@@ -1153,6 +1163,7 @@ proc readKerning(f: ParsedFont) =
         sub = sub + f.data.offset32(sub + 4)
       if kind == 2:
         subtables.add f.data.readPairPos(sub)
+        inc kept
     if subtables.len > 0:
       f.kerning.add subtables
 
