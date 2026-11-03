@@ -546,7 +546,8 @@ func toArc*(el: PathEl, start: Point): Arc =
   ## following SVG's rules: radii too small to reach both points are scaled
   ## up uniformly, and the flags pick one of the four arcs through them. A
   ## zero radius gives a degenerate arc (see `isDegenerate`), which draws as
-  ## a line to `arcEnd`.
+  ## a line to `arcEnd`. So do endpoints too close to fix a center, whether
+  ## they are the same point or so near that the squares below underflow.
   doAssert el.kind == peArcTo, "toArc needs an arc element"
   var rx = el.radii.x
   var ry = el.radii.y
@@ -568,9 +569,9 @@ func toArc*(el: PathEl, start: Point): Arc =
   let rx2 = rx * rx
   let ry2 = ry * ry
   let denom = rx2 * y1 * y1 + ry2 * x1 * x1
-  var coef = 0.0
-  if denom > 0:
-    coef = sqrt(max(0.0, (rx2 * ry2 - rx2 * y1 * y1 - ry2 * x1 * x1) / denom))
+  if denom < 1e-280:
+    return Arc(center: mid, rotation: el.rotation)
+  var coef = sqrt(max(0.0, (rx2 * ry2 - rx2 * y1 * y1 - ry2 * x1 * x1) / denom))
   if el.largeArc == el.sweep:
     coef = -coef
   let cx1 = coef * rx * y1 / ry
@@ -640,7 +641,7 @@ func toCubics*(el: PathEl, start: Point): seq[PathEl] =
   ## it is.
   if el.kind != peArcTo:
     return @[el]
-  if el.arcEnd ~= start:
+  if el.arcEnd == start:
     return
   let a = el.toArc(start)
   if a.isDegenerate:
@@ -852,13 +853,9 @@ func boundingBox*(path: BezPath): Rect =
       pen = el.cubicEnd
     of peArcTo:
       take rectFromPoints(pen, el.arcEnd)
-      # An arc that ends where it starts draws nothing, as in `flatten` and
-      # `toCubics`; its center form would sit on the pen, a radius away from
-      # every point of the path.
-      if not (el.arcEnd ~= pen):
-        let a = el.toArc(pen)
-        if not a.isDegenerate:
-          take a.boundingBox
+      let a = el.toArc(pen)
+      if not a.isDegenerate:
+        take a.boundingBox
       pen = el.arcEnd
     of peClosePath:
       pen = start
@@ -1022,7 +1019,7 @@ func flatten*(path: BezPath, tolerance: float64): seq[Polyline] =
         current.points.add pen
         start = pen
         open = true
-      if not (el.arcEnd ~= pen):
+      if el.arcEnd != pen:
         let a = el.toArc(pen)
         if not a.isDegenerate:
           let n = arcSegments(a, tolerance)

@@ -192,6 +192,26 @@ suite "arcs":
     check same.toCubics.len == 1
     check same.boundingBox == rect(5, 5, 5, 5)
 
+  test "only an arc that ends exactly at its start is nothing":
+    # Half a unit apart at this size is within the tolerance of `~=`, but it
+    # is still an arc: SVG draws it, so the other paths have to as well.
+    var far = newPath()
+    far.moveTo 1e9, 0
+    far.arcTo(10.0, point(1e9 + 0.5, 0))
+    check far.flatten(0.0001)[0].points.len > 2
+    check far.toCubics.elements[1].kind == peCubicTo
+    check far.boundingBox.y1 - far.boundingBox.y0 > 0.001
+    # Closer than anything `toArc` can solve for, on either arc: a line to
+    # the end, not a half circle a radius away from it.
+    for largeArc in [false, true]:
+      var tiny = newPath()
+      tiny.moveTo 0, 0
+      tiny.arcTo(10.0, point(1e-200, 0), largeArc = largeArc)
+      check tiny.elements[1].toArc(point(0, 0)).isDegenerate
+      check tiny.flatten(0.1)[0].points == @[point(0, 0), point(1e-200, 0)]
+      check tiny.toCubics.elements[1] == lineTo(point(1e-200, 0))
+      check tiny.boundingBox == rect(0, 0, 1e-200, 0)
+
   test "flattened arcs lie on the circle":
     var p = newPath()
     p.moveTo 0, 0
