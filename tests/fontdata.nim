@@ -7,12 +7,15 @@
 ## TrueType form (`glyf` outlines, composite glyphs) and its CFF form
 ## (subroutines, hint masks, flex).
 
-import std/[os, staticos]
+import std/[os, staticos, strutils]
 
 const
-  fontDir = currentSourcePath().parentDir / "fonts"
-  trueTypePath = fontDir / "SourceSans3-Regular.ttf"
-  cffPath = fontDir / "SourceSans3-Regular.otf"
+  # Under JavaScript `std/os` follows POSIX rules even on a Windows host, so
+  # `parentDir` can't take a path with backslashes apart. Windows takes
+  # forward slashes too.
+  fontDir = currentSourcePath().replace('\\', '/').parentDir & "/fonts"
+  trueTypePath = fontDir & "/SourceSans3-Regular.ttf"
+  cffPath = fontDir & "/SourceSans3-Regular.otf"
 
 # `staticFileExists` rather than `fileExists`, which the JavaScript target
 # doesn't have.
