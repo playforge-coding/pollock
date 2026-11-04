@@ -1238,13 +1238,15 @@ proc layout*(e: OpenTypeEngine, text: string, style: TextStyle): TextLayout =
   if ids.len == 0:
     return
   var run = GlyphRun(font: style.font, size: style.size, paint: style.paint)
-  var x = 0
+  # In `float64`, as a long run of a font's largest advances and kerning passes
+  # 2^31, which is an overflow on JS.
+  var x = 0.0
   for k in 0 ..< ids.len:
-    run.glyphs.add Glyph(id: ids[k], pos: point(x.float64 * s, 0), cluster: clusters[k])
-    x += f.advance(ids[k])
+    run.glyphs.add Glyph(id: ids[k], pos: point(x * s, 0), cluster: clusters[k])
+    x += f.advance(ids[k]).float64
     if k + 1 < ids.len:
-      x += f.kerning(ids[k], ids[k + 1])
-  result.width = x.float64 * s
+      x += f.kerning(ids[k], ids[k + 1]).float64
+  result.width = x * s
   result.runs = @[run]
 
 proc glyphDrawing*(e: OpenTypeEngine, font: Font, glyph: GlyphId): GlyphDrawing =

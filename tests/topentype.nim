@@ -279,6 +279,25 @@ suite "opentype internals":
     check f.kerning[1].len == maxKernSubtables - subtables
     check f.kerning(GlyphId(1), GlyphId(2)) == 0
 
+  test "a pen position past 32 bits doesn't overflow":
+    # Every lookup the cap allows is one subtable that adds 32767 between two
+    # notdefs, so 100 glyphs pass 2^31. `int` on JS can't hold that.
+    var sub = be16(1) & be16(12) & be16(4) & be16(0) & be16(1) & be16(22)
+    sub.add be16(2) & be16(1) & be16(0) & be16(0) & be16(0) # coverage: glyph 0
+    sub.add be16(1) & be16(0) & be16(32767) # one pair set: glyph 0, then 32767
+    let f = ParsedFont(data: sub, unitsPerEm: 1000)
+    for i in 0 ..< maxKernSubtables:
+      f.kerning.add @[sub.readPairPos(0)]
+    var text = ""
+    for i in 0 ..< 100:
+      text.add 'a'
+    let style = TextStyle(font: Font(cache: f), size: 1000)
+    let laid = OpenTypeEngine().layout(text, style)
+    let pair = float64(maxKernSubtables) * 32767
+    check laid.width == 99 * pair
+    check laid.runs[0].glyphs[99].pos.x == 99 * pair
+    check laid.runs[0].glyphs[1].pos.x == pair
+
   test "subroutines that call subroutines are limited, not exponential":
     # Subroutine k calls subroutine k + 1 twenty times, and the last draws
     # a line: 20^8 lines from the first. Two levels draw; eight run out.
