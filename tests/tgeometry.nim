@@ -212,6 +212,42 @@ suite "arcs":
       check tiny.toCubics.elements[1] == lineTo(point(1e-200, 0))
       check tiny.boundingBox == rect(0, 0, 1e-200, 0)
 
+  test "what makes an arc degenerate doesn't depend on its size":
+    # The same arc from 1e-200 to 1e200. The squares of the outer sizes
+    # underflow or overflow, but the shape doesn't change.
+    for scale in [1e-200, 1e-100, 1e-70, 1e-60, 1.0, 1e60, 1e100, 1e200]:
+      let a =
+        arcTo(vec2(scale, scale), 0.0, false, true, point(scale, 0)).toArc(point(0, 0))
+      check not a.isDegenerate
+      check abs(a.center.x / scale - 0.5) < 1e-12
+      check abs(a.center.y / scale - sqrt(3.0) / 2) < 1e-12
+      check abs(a.radii.x / scale - 1) < 1e-12
+      check abs(a.sweepAngle - PI / 3) < 1e-12
+      var p = newPath()
+      p.moveTo 0, 0
+      p.arcTo(scale, point(scale, 0))
+      check abs(p.boundingBox.y0 / scale - (sqrt(3.0) / 2 - 1)) < 1e-12
+      check p.flatten(scale / 1000)[0].points.len > 2
+    # A chord tiny next to the radius is a line, finite at every size. The
+    # textbook formula's division overflows on the first three of these.
+    for (radius, to) in [(1e100, 1e-60), (1.0, 1e-155), (1.0, 1e-160), (1e-100, 1e-300)]:
+      for largeArc in [false, true]:
+        let a = arcTo(vec2(radius, radius), 0.0, largeArc, true, point(to, 0)).toArc(
+            point(0, 0)
+          )
+        check a.isDegenerate
+        check a.center.x == to / 2
+        check a.center.y == 0
+    # A chord just above the limit is still an arc, with a finite center.
+    let thin = arcTo(vec2(1, 1), 0.0, false, true, point(1e-140, 0)).toArc(point(0, 0))
+    check not thin.isDegenerate
+    check abs(thin.center.y - 1) < 1e-12
+
+  test "radii too far apart to scale up fall back to a line":
+    let a = arcTo(vec2(1e300, 1e-300), 0.0, false, true, point(0, 1)).toArc(point(0, 0))
+    check a.isDegenerate
+    check a.center == point(0, 0.5)
+
   test "flattened arcs lie on the circle":
     var p = newPath()
     p.moveTo 0, 0

@@ -541,13 +541,19 @@ func isDegenerate*(a: Arc): bool =
   ## True when a radius is zero, so the arc is a straight line.
   a.radii.x <= 0 or a.radii.y <= 0
 
+const minArcChord = 1e-150
+  ## Half an arc's chord as a fraction of its radii, below which `toArc` calls
+  ## it a line. The square of this is about the smallest a `float64` holds.
+
 func toArc*(el: PathEl, start: Point): Arc =
   ## The center parameterization of an arc element that begins at `start`,
   ## following SVG's rules: radii too small to reach both points are scaled
   ## up uniformly, and the flags pick one of the four arcs through them. A
   ## zero radius gives a degenerate arc (see `isDegenerate`), which draws as
   ## a line to `arcEnd`. So do endpoints too close to fix a center, whether
-  ## they are the same point or so near that the squares below underflow.
+  ## they are the same point or under `minArcChord` of the radii apart, and
+  ## radii too large to represent once scaled. Only the ratio of the chord to
+  ## the radii matters, so an arc of any size converts the same way.
   doAssert el.kind == peArcTo, "toArc needs an arc element"
   var rx = el.radii.x
   var ry = el.radii.y
@@ -561,25 +567,31 @@ func toArc*(el: PathEl, start: Point): Arc =
   let dy = (start.y - el.arcEnd.y) * 0.5
   let x1 = cosPhi * dx + sinPhi * dy
   let y1 = -sinPhi * dx + cosPhi * dy
-  let lambda = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry)
-  if lambda > 1:
-    let s = sqrt(lambda)
-    rx *= s
-    ry *= s
-  let rx2 = rx * rx
-  let ry2 = ry * ry
-  let denom = rx2 * y1 * y1 + ry2 * x1 * x1
-  if denom < 1e-280:
+  # The rest is solved on the unit circle, where nothing is squared, so no
+  # size of arc can underflow or overflow on the way. `h` is half the chord's
+  # length there, and past 1 it is the factor that makes the radii reach.
+  let h = hypot(x1 / rx, y1 / ry)
+  let s = max(h, 1.0)
+  # Written so that a NaN falls back as well.
+  if not (h >= minArcChord and rx * s < Inf and ry * s < Inf):
     return Arc(center: mid, rotation: el.rotation)
-  var coef = sqrt(max(0.0, (rx2 * ry2 - rx2 * y1 * y1 - ry2 * x1 * x1) / denom))
+  rx *= s
+  ry *= s
+  let px = x1 / rx
+  let py = y1 / ry
+  let chord = h / s
+  var coef = sqrt((1 - chord) * (1 + chord)) / chord
   if el.largeArc == el.sweep:
     coef = -coef
-  let cx1 = coef * rx * y1 / ry
-  let cy1 = -coef * ry * x1 / rx
+  # The center, from the middle of the chord along its perpendicular.
+  let cu = coef * py
+  let cv = -coef * px
+  let cx1 = cu * rx
+  let cy1 = cv * ry
   let center =
     point(cosPhi * cx1 - sinPhi * cy1 + mid.x, sinPhi * cx1 + cosPhi * cy1 + mid.y)
-  let u = vec2((x1 - cx1) / rx, (y1 - cy1) / ry)
-  let v = vec2((-x1 - cx1) / rx, (-y1 - cy1) / ry)
+  let u = vec2(px - cu, py - cv)
+  let v = vec2(-px - cu, -py - cv)
   var sweep = arctan2(cross(u, v), dot(u, v))
   if el.sweep and sweep < 0:
     sweep += 2 * PI
