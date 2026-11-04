@@ -14,19 +14,21 @@ type
     ckRestore
     ckTransform
     ckDrawImage
+    ckDrawGlyphs
     ckFinish
 
   Command* = object
     kind*: CommandKind
     color*: Color ## `ckClear`
     path*: BezPath ## `ckFillPath`, `ckStrokePath`, `ckClipPath`
-    paint*: Paint ## `ckFillPath`, `ckStrokePath`
+    paint*: Paint ## `ckFillPath`, `ckStrokePath`, `ckDrawGlyphs`
     rule*: FillRule ## `ckFillPath`, `ckClipPath`
     style*: StrokeStyle ## `ckStrokePath`
     affine*: Affine ## `ckTransform`
     image*: ImageData ## `ckDrawImage`
     dst*: Rect ## `ckDrawImage`
     interp*: Interpolation ## `ckDrawImage`
+    run*: GlyphRun ## `ckDrawGlyphs`
 
   RecordingContext* = object
     commands*: seq[Command]
@@ -70,6 +72,10 @@ proc drawImage*(
     ctx: var RecordingContext, image: ImageData, dst: Rect, interp: Interpolation
 ) =
   ctx.commands.add Command(kind: ckDrawImage, image: image, dst: dst, interp: interp)
+
+proc drawGlyphs*(ctx: var RecordingContext, run: GlyphRun, paint: Paint) =
+  ## Records the run. No engine is needed, since nothing is drawn.
+  ctx.commands.add Command(kind: ckDrawGlyphs, run: run, paint: paint)
 
 proc finish*(ctx: var RecordingContext): RenderResult =
   ctx.commands.add Command(kind: ckFinish)

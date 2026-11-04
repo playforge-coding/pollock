@@ -10,6 +10,7 @@ nav = [
   { "Overview" = "index.md" },
   { "Getting started" = "getting-started.md" },
   { "Drawing" = "drawing.md" },
+  { "Text" = "text.md" },
   { "The context" = "context.md" },
   { "Backends" = "backends.md" },
   { "Writing a backend" = "writing-a-backend.md" },

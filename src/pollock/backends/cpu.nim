@@ -6,12 +6,18 @@
 ## signed area coverage per pixel, the technique font rasterizers like
 ## font-rs use. Strokes are expanded into an outline by `stroke.nim` and
 ## filled with the nonzero rule. Clips are coverage masks that multiply into
-## later fills.
+## later fills. Text is the engine's outlines, filled like any path.
+##
+## The context is generic over its text engine: `CpuContext` pairs it with
+## the default engine, and `newCpuContext(width, height, engine)` makes a
+## `CpuContextOf` over any other.
 
 import std/math
 import ../context
 
 export context
+
+importTextEngine()
 
 type
   ClipMask = ref object
@@ -21,14 +27,18 @@ type
     transform: Affine
     clip: ClipMask ## nil when nothing is clipped.
 
-  CpuContext* = object
+  CpuContextOf*[E] = object
     width*, height*: int
     tolerance*: float64 ## Flattening tolerance in device pixels.
+    engine*: E ## The text engine whose glyphs it draws.
     pixels: seq[float32] ## Premultiplied RGBA, four values per pixel.
     acc: seq[float32] ## Coverage accumulation, `width + 2` cells per row.
     state: CpuState
     stack: seq[CpuState]
     error: string
+
+  CpuContext* = CpuContextOf[typeof(defaultTextEngine())]
+    ## The all-Nim pairing: the CPU backend with the default text engine.
 
   ShaderKind = enum
     skSolid
@@ -52,16 +62,23 @@ type
     dst: Rect
     interp: Interpolation
 
-proc newCpuContext*(width, height: int): CpuContext =
-  ## A transparent black target of the given size in pixels.
-  CpuContext(
+proc newCpuContext*[E](width, height: int, engine: E): CpuContextOf[E] =
+  ## A transparent black target of the given size in pixels, drawing text
+  ## with `engine`.
+  CpuContextOf[E](
     width: width,
     height: height,
     tolerance: 0.1,
+    engine: engine,
     pixels: newSeq[float32](width * height * 4),
     acc: newSeq[float32]((width + 2) * height),
     state: CpuState(transform: affineIdentity),
   )
+
+proc newCpuContext*(width, height: int): CpuContext =
+  ## A transparent black target of the given size in pixels, with the
+  ## default text engine.
+  newCpuContext(width, height, defaultTextEngine())
 
 # Shaders
 
@@ -138,7 +155,7 @@ func sample(sh: Shader, x, y: float64): Color =
 
 # Rasterization
 
-proc accumulateLine(ctx: var CpuContext, a, b: Point) =
+proc accumulateLine[E](ctx: var CpuContextOf[E], a, b: Point) =
   # Adds the signed area contribution of one edge to the accumulation
   # buffer. Both x coordinates must already lie in `0 .. width`.
   if abs(a.y - b.y) < 1e-12:
@@ -195,7 +212,7 @@ proc accumulateLine(ctx: var CpuContext, a, b: Point) =
       ctx.acc[lineStart + x1i] += float32(d * am)
     x = xnext
 
-proc accumulateEdge(ctx: var CpuContext, a, b: Point) =
+proc accumulateEdge[E](ctx: var CpuContextOf[E], a, b: Point) =
   # Splits an edge where it crosses the left and right borders. The part
   # outside becomes a vertical edge on the border, which keeps its winding
   # effect on the pixels inside.
@@ -227,7 +244,7 @@ func coverage(acc: float32, rule: FillRule): float32 =
     1.0'f32 - abs(1.0'f32 - m)
 
 template forCoverage(
-    ctx: var CpuContext,
+    ctx: untyped,
     polylines: seq[Polyline],
     rule: FillRule,
     x, y: untyped,
@@ -270,7 +287,7 @@ template forCoverage(
           if cov > 0.0005'f32:
             body
 
-proc blend(ctx: var CpuContext, x, y: int, src: Color, cov: float32) =
+proc blend[E](ctx: var CpuContextOf[E], x, y: int, src: Color, cov: float32) =
   # Source-over with premultiplied colors.
   let i = (y * ctx.width + x) * 4
   let a = float32(src.a) * cov
@@ -280,8 +297,8 @@ proc blend(ctx: var CpuContext, x, y: int, src: Color, cov: float32) =
   ctx.pixels[i + 2] = float32(src.b) * cov + ctx.pixels[i + 2] * inv
   ctx.pixels[i + 3] = a + ctx.pixels[i + 3] * inv
 
-proc fillPolylines(
-    ctx: var CpuContext, polylines: seq[Polyline], rule: FillRule, shader: Shader
+proc fillPolylines[E](
+    ctx: var CpuContextOf[E], polylines: seq[Polyline], rule: FillRule, shader: Shader
 ) =
   if shader.kind == skSolid:
     let c = shader.color
@@ -291,12 +308,12 @@ proc fillPolylines(
     ctx.forCoverage(polylines, rule, x, y, cov):
       ctx.blend(x, y, shader.sample(x.float64 + 0.5, y.float64 + 0.5), cov)
 
-func devicePolylines(ctx: CpuContext, path: BezPath): seq[Polyline] =
+func devicePolylines[E](ctx: CpuContextOf[E], path: BezPath): seq[Polyline] =
   ctx.state.transform.transform(path).flatten(ctx.tolerance)
 
 # The contract
 
-proc clear*(ctx: var CpuContext, color: Color) =
+proc clear*[E](ctx: var CpuContextOf[E], color: Color) =
   let c = color.clamped.premultiplied
   for i in 0 ..< ctx.width * ctx.height:
     ctx.pixels[i * 4] = float32(c.r)
@@ -304,14 +321,18 @@ proc clear*(ctx: var CpuContext, color: Color) =
     ctx.pixels[i * 4 + 2] = float32(c.b)
     ctx.pixels[i * 4 + 3] = float32(c.a)
 
-proc fillPath*(ctx: var CpuContext, path: BezPath, paint: Paint, rule: FillRule) =
+proc fillPath*[E](
+    ctx: var CpuContextOf[E], path: BezPath, paint: Paint, rule: FillRule
+) =
   if path.isEmpty:
     return
   ctx.fillPolylines(
     ctx.devicePolylines(path), rule, makeShader(paint, ctx.state.transform)
   )
 
-proc strokePath*(ctx: var CpuContext, path: BezPath, paint: Paint, style: StrokeStyle) =
+proc strokePath*[E](
+    ctx: var CpuContextOf[E], path: BezPath, paint: Paint, style: StrokeStyle
+) =
   if path.isEmpty or style.width <= 0:
     return
   # The stroke is expanded in user space so a non-uniform transform
@@ -324,7 +345,7 @@ proc strokePath*(ctx: var CpuContext, path: BezPath, paint: Paint, style: Stroke
     ctx.devicePolylines(outline), frNonZero, makeShader(paint, ctx.state.transform)
   )
 
-proc clipPath*(ctx: var CpuContext, path: BezPath, rule: FillRule) =
+proc clipPath*[E](ctx: var CpuContextOf[E], path: BezPath, rule: FillRule) =
   var mask = ClipMask(coverage: newSeq[float32](ctx.width * ctx.height))
   # Bound first: `forCoverage` is a template and would flatten twice.
   let polylines = ctx.devicePolylines(path)
@@ -332,21 +353,21 @@ proc clipPath*(ctx: var CpuContext, path: BezPath, rule: FillRule) =
     mask.coverage[y * ctx.width + x] = cov
   ctx.state.clip = mask
 
-proc save*(ctx: var CpuContext) =
+proc save*[E](ctx: var CpuContextOf[E]) =
   ctx.stack.add ctx.state
 
-proc restore*(ctx: var CpuContext) =
+proc restore*[E](ctx: var CpuContextOf[E]) =
   if ctx.stack.len > 0:
     ctx.state = ctx.stack.pop()
 
-proc transform*(ctx: var CpuContext, affine: Affine) =
+proc transform*[E](ctx: var CpuContextOf[E], affine: Affine) =
   ctx.state.transform = ctx.state.transform * affine
 
-proc currentTransform*(ctx: CpuContext): Affine =
+proc currentTransform*[E](ctx: CpuContextOf[E]): Affine =
   ctx.state.transform
 
-proc drawImage*(
-    ctx: var CpuContext, image: ImageData, dst: Rect, interp: Interpolation
+proc drawImage*[E](
+    ctx: var CpuContextOf[E], image: ImageData, dst: Rect, interp: Interpolation
 ) =
   if image.isEmpty or dst.isEmpty:
     return
@@ -356,7 +377,11 @@ proc drawImage*(
     imageShader(image, dst, interp, ctx.state.transform),
   )
 
-proc finish*(ctx: var CpuContext): RenderResult =
+proc drawGlyphs*[E](ctx: var CpuContextOf[E], run: GlyphRun, paint: Paint) =
+  ## Fills the engine's outlines.
+  ctx.drawGlyphsAsPaths(ctx.engine, run, paint)
+
+proc finish*[E](ctx: var CpuContextOf[E]): RenderResult =
   if ctx.error.len > 0:
     result = failure(ctx.error)
     ctx.error = ""
@@ -365,7 +390,7 @@ proc finish*(ctx: var CpuContext): RenderResult =
 
 # Reading back
 
-func pixel*(ctx: CpuContext, x, y: int): Color =
+func pixel*[E](ctx: CpuContextOf[E], x, y: int): Color =
   ## The straight-alpha color of one pixel.
   let i = (y * ctx.width + x) * 4
   Color(
@@ -375,7 +400,7 @@ func pixel*(ctx: CpuContext, x, y: int): Color =
     a: ctx.pixels[i + 3].float64,
   ).unpremultiplied
 
-func toImage*(ctx: CpuContext, format = ifRgba8): ImageData =
+func toImage*[E](ctx: CpuContextOf[E], format = ifRgba8): ImageData =
   ## The rendered picture.
   result = newImage(ctx.width, ctx.height, format)
   for y in 0 ..< ctx.height:

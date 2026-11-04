@@ -21,8 +21,9 @@ The library has no dependencies. The [examples](examples.md) window uses the off
 | `nimble testcpp` | Runs the same tests under the C++ target. |
 | `nimble testjs` | Runs the same tests under the JavaScript target with Node. |
 | `nimble testcairo` | Runs the Cairo backend's tests under the C and C++ targets, each once under ORC and once under refc. Needs Cairo's development package, found through `pkg-config`. |
-| `nimble samples` | Renders the sample scenes with the CPU and SVG backends into `out/`, and with Cairo too (as `<name>-cairo.png`) when `pkg-config` finds it. |
-| `nimble goldens` | Rewrites the golden files in `tests/golden/` from the current output. |
+| `nimble samples` | Renders the sample scenes and the text scene with the CPU and SVG backends into `out/`, and with Cairo too (as `<name>-cairo.png`) when `pkg-config` finds it. |
+| `nimble goldens` | Rewrites the golden files in `tests/golden/` from the current output, the sample scenes and the text scene. |
+| `nimble fonts` | Downloads the [test fonts](#test-fonts) into `tests/fonts/` and checks their sums. Every task above runs it first; run it yourself before compiling a test or the examples by hand. |
 | `nimble setup` | Installs the locked development dependencies and writes `nimble.paths`. |
 | `nimble window` | Opens the [example scenes](examples.md) in a native window. Needs SDL3; builds in the Cairo backend too when `pkg-config` finds it. |
 | `nph src tests tools examples` | Formats the code. Run it before committing. |
@@ -34,24 +35,32 @@ One `t*.nim` per area in `tests/`, using `std/unittest`:
 
 - `tgeometry`, `tcolor`, `tstroke`: the value types.
 - `tdraw`: the high-level API, checked through the recording backend.
+- `ttext`: the text API and the pure Nim engine, with the [test fonts](#test-fonts) in both forms: character lookup, metrics, clusters, kerned widths compared with HarfBuzz's, outlines and composite glyphs, the two formats agreeing, caching, bad fonts, drawing on every backend, and the text scene's goldens.
+- `topentype`: the engine's internals in isolation (a format 12 character map, dict operands, charstring subroutines and flex), by `include`-ing the module and feeding it hand-built bytes, so a failure points at one parser rather than at a whole font.
 - `tpng`: the PNG codec, including a zlib stream made by Python's `zlib` to exercise dynamic Huffman decoding.
 - `tsvg`: the SVG writer's output.
 - `tcpu`: the rasterizer, with exact pixel checks for aligned shapes, half-pixel coverage, compositing, fill rules, clips, transforms, strokes, geometry outside the target, gradients and images.
 - `tsamples`: renders every sample scene with the CPU and SVG backends and compares with the goldens.
 - `texamples`: runs every [example scene](examples.md) without a window for a few seconds of simulated time with a scripted pointer, and checks that it draws on the CPU, SVG and recording backends with balanced `save` and `restore`, moves on its own, reacts to the pointer, and repeats exactly. The scenes are animations and simulations, so they have no goldens. `tests/config.nims` puts `examples/` on the path for it.
-- `tcairo`: the Cairo backend, with pixel checks for the things Cairo does differently from the CPU backend (clear, clips, singular and non-finite transforms, degenerate gradients, dashes, image byte order, wrapping a `cairo_t` without disturbing its state, error reporting and reading back a failed context), and the sample scenes compared with the CPU goldens at a tolerance. The whole file is a no-op unless compiled with `-d:pollockCairo`, so `nimble test`, `nimble testcpp` and `nimble testjs` still run on machines without Cairo; `nimble testcairo` passes the define.
+- `tcairo`: the Cairo backend, with pixel checks for the things Cairo does differently from the CPU backend (clear, clips, singular and non-finite transforms, degenerate gradients, dashes, arcs, image byte order, wrapping a `cairo_t` without disturbing its state, error reporting and reading back a failed context), and the sample scenes and the text scene compared with the CPU goldens at a tolerance. The whole file is a no-op unless compiled with `-d:pollockCairo`, so `nimble test`, `nimble testcpp` and `nimble testjs` still run on machines without Cairo; `nimble testcairo` passes the define.
 
 Add a test with every behavior change. Tests that touch files skip themselves under JavaScript with `when not defined(js)`. A test for a native backend guards its whole body with that backend's define, as `tcairo` does.
 
 ## Golden files
 
-`tests/golden/cpu/*.png` and `tests/golden/svg/*.svg` are the expected output of the sample scenes. The CPU backend is deterministic, so its goldens must match exactly; the SVG goldens are compared as text. Native backends have no goldens of their own: they are compared with the CPU goldens at a tolerance, since their antialiasing differs along edges and can change between library versions. `.gitattributes` forces LF line endings, so a Windows checkout doesn't turn them into CRLF and break the comparison.
+`tests/golden/cpu/*.png` and `tests/golden/svg/*.svg` are the expected output of the sample scenes and of the text scene (`text.png`, `text.svg`, checked by `ttext`). The CPU backend is deterministic, so its goldens must match exactly; the SVG goldens are compared as text. Native backends have no goldens of their own: they are compared with the CPU goldens at a tolerance, since their antialiasing differs along edges and can change between library versions. `.gitattributes` forces LF line endings, so a Windows checkout doesn't turn them into CRLF and break the comparison.
 
 When a change alters rendering on purpose, run `nimble goldens`, look at the new images (open the PNGs, and the SVGs in a browser), and say in the commit message why they changed. Never regenerate goldens to make a failing test pass without looking.
 
 ## Adding a sample scene
 
 Add a proc to `src/pollock/samples.nim`, a name to `sampleNames` and a branch to `drawSample`, then run `nimble goldens` and commit the new golden files. A normal test run never writes goldens, so a scene without them fails until they are committed. A scene should exercise one area (a feature or an edge case) so a failure points somewhere.
+
+## Test fonts
+
+The text tests, the text scene and the [lettering example](examples.md) use Source Sans 3 Regular, by Adobe, under the SIL Open Font License, in its TrueType form (`glyf` outlines, mostly composite glyphs) and its CFF form (name-keyed, with subroutines, hint masks and flex). The fonts aren't committed. `tools/fetchfonts.nim` downloads them from [adobe-fonts/source-sans](https://github.com/adobe-fonts/source-sans) at the `3.052R` tag into `tests/fonts/` (which git ignores) with `curl`, and checks each against a SHA-256 sum pinned in the tool; a file that is already there with the right sum isn't downloaded again. `nimble fonts` runs it, and so does every task that compiles something that embeds them. `tests/fontdata.nim` embeds them with `staticRead`, so the tests run under JavaScript too, and stops the compile with a message that says to run `nimble fonts` when they are missing. CI caches the directory.
+
+Changing the fonts is changing the tool: point it at the new files, put in their sums (`shasum -a 256`), fix the values in `ttext` (the kerned widths there come from HarfBuzz, shaping with only the `kern` feature on) and rewrite the text goldens. A font that exercises something new (ligatures, a CID-keyed CFF, a color font) gets an entry in the tool the same way: pick a source that serves the file on its own at a fixed tag, not one where it only comes inside an archive.
 
 ## Documentation
 
@@ -66,6 +75,6 @@ Update the docs with the code. The Docs workflow runs the strict build on pull r
 
 ## Continuous integration
 
-- **CI** (`ci.yml`): runs `nimble test`, `nimble testcpp`, `nimble testjs` and `nimble samples` on Linux, macOS and Windows, builds the example window there (without running it, so SDL3 itself isn't needed), installs Cairo and runs `nimble testcairo` on Linux and macOS, uploads the rendered samples as artifacts, and checks formatting with `nph --check`. It gets Nim and nph from mise at the versions in `mise.toml`, each job installing only the one it uses, and skips pushes and pull requests that only change the docs, Markdown files or the license.
+- **CI** (`ci.yml`): fetches the test fonts (cached, keyed on `tools/fetchfonts.nim`), runs `nimble test`, `nimble testcpp`, `nimble testjs` and `nimble samples` on Linux, macOS and Windows, builds the example window there (without running it, so SDL3 itself isn't needed), installs Cairo and runs `nimble testcairo` on Linux and macOS, uploads the rendered samples as artifacts, and checks formatting with `nph --check`. It gets Nim and nph from mise at the versions in `mise.toml`, each job installing only the one it uses, and skips pushes and pull requests that only change the docs, Markdown files or the license.
 - **Docs** (`docs.yml`): builds the docs strictly when they change.
 - **Pages** (`pages.yml`): deploys the docs to GitHub Pages from `main`.

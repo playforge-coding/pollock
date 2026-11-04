@@ -81,6 +81,22 @@ writePng(ctx.toImage(), "first-cairo.png")
 
 `newCairoContext` also accepts a pointer to a `cairo_t` you already have, so the same code can draw into a GTK widget.
 
+## Text
+
+Text needs a font file, which pollock reads itself (TrueType or CFF outlines):
+
+```nim
+import pollock
+
+var ctx = newCpuContext(320, 100)
+ctx.clear(white)
+let font = newFont(readFile("Inter-Regular.ttf"))
+ctx.drawText("Hello, pollock!", textStyle(font, 32), point(20, 60))
+writePng(ctx.toImage(), "hello.png")
+```
+
+The point is where the baseline starts. [Text](text.md) covers layouts, metrics and the engine behind it.
+
 ## Writing code that works with any backend
 
 Make the procedure generic over `RenderContext`:
@@ -108,4 +124,4 @@ The value is a module path, so a backend from another package works too (`-d:pol
 
 ## Next
 
-[Examples](examples.md) has five animated scenes (an orrery, fireworks, a Bezier curve editor, meshing gears and a flow field) that run in a native window and react to the mouse, with the code in `examples/`.
+[Examples](examples.md) has six animated scenes (an orrery, fireworks, a Bezier curve editor, meshing gears, a flow field and lettering set glyph by glyph) that run in a native window and react to the mouse, with the code in `examples/`.

@@ -6,6 +6,8 @@ when defined(pollockCairo) and not defined(js):
   import pollock/[samples, testing, png]
   import pollock/backends/cairo
 
+  import ./fontdata
+
   const goldenDir = currentSourcePath().parentDir / "golden" / "cpu"
 
   func near(a, b: Color, tolerance = 0.02): bool =
@@ -207,5 +209,17 @@ when defined(pollockCairo) and not defined(js):
         )
         check not diff.sizeMismatch
         check diff.differingPixels <= sampleWidth * sampleHeight div 200
+
+    test "text matches the CPU golden within tolerance":
+      var ctx = newCairoContext(sampleWidth, sampleHeight)
+      ctx.drawTextSample(newFont(trueTypeData), newFont(cffData))
+      check ctx.finish().ok
+      let golden = readPng(goldenDir / "text.png")
+      let diff = compareImages(ctx.toImage(), golden, tolerance = 32)
+      checkpoint(
+        &"text: {diff.differingPixels} pixels differ, max channel diff {diff.maxChannelDiff}"
+      )
+      check not diff.sizeMismatch
+      check diff.differingPixels <= sampleWidth * sampleHeight div 200
 else:
   echo "tcairo: skipped, compile with -d:pollockCairo (nimble testcairo)"

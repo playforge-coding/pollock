@@ -252,6 +252,33 @@ proc sampleArcs[C: RenderContext](ctx: var C) =
     ctx.fill(leaf, palette[2].withAlpha(0.85))
     ctx.stroke(leaf, rgb8(40, 90, 60), 2.0)
 
+proc drawTextSample*[C: RenderContext](ctx: var C, trueType, cff: Font) =
+  ## The text scene, at `sampleWidth` by `sampleHeight`: the same face in
+  ## its TrueType and CFF forms (the tests use Source Sans 3), kerning, a gradient
+  ## paint, a transform, and a layout's metrics. It needs a context with an
+  ## `engine`, so the recording backend can't draw it. It isn't part of
+  ## `drawSample` because it needs fonts, which `pollock/samples` doesn't
+  ## carry; the goldens are `text.png` and `text.svg`.
+  ctx.clear(white)
+  ctx.drawText("Hello, pollock!", textStyle(trueType, 36), point(20, 54))
+  ctx.drawText(
+    "Añejo fjord café", textStyle(cff, 28, rgb8(60, 90, 200)), point(20, 100)
+  )
+  ctx.drawText(
+    "AVATAR To.",
+    textStyle(
+      trueType, 44, linearGradient(point(20, 0), point(280, 0), rgb8(220, 60, 60), blue)
+    ),
+    point(20, 160),
+  )
+  ctx.withTransform(rotateAbout(-PI / 12, point(300, 240))):
+    ctx.drawText("tilt", textStyle(cff, 60, rgb8(30, 160, 90)), point(250, 262))
+  let layout = ctx.engine.layout("Metrics gy", textStyle(trueType, 30))
+  ctx.withTransform(translate(20, 250)):
+    ctx.stroke(layout.bounds, rgb8(200, 200, 200), 1.0)
+    ctx.stroke(line(0, 0, layout.width, 0), red, 1.0)
+    ctx.drawText(layout, point(0, 0))
+
 proc drawSample*[C: RenderContext](ctx: var C, index: int) =
   ## Draws sample `index` (see `sampleNames`) on any backend.
   case index

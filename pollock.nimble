@@ -19,13 +19,26 @@ dev:
 
 import std/[os, strutils]
 
+proc fetchFonts() =
+  # The text tests and the lettering example embed fonts that aren't
+  # committed; this downloads them once and checks their sums.
+  exec "nim r --hints:off tools/fetchfonts.nim"
+
+task fonts, "Download the fonts the tests and examples embed into tests/fonts":
+  fetchFonts()
+
+before test:
+  fetchFonts()
+
 task testjs, "Run the tests under the JavaScript target with Node":
+  fetchFonts()
   for path in listFiles("tests"):
     let name = path.extractFilename
     if name.startsWith("t") and name.endsWith(".nim"):
       exec "nim js -r -d:nodejs --hints:off --outdir:tests/jsout " & path
 
 task testcpp, "Run the tests under the C++ target":
+  fetchFonts()
   for path in listFiles("tests"):
     let name = path.extractFilename
     if name.startsWith("t") and name.endsWith(".nim"):
@@ -34,6 +47,7 @@ task testcpp, "Run the tests under the C++ target":
 task testcairo, "Run the Cairo backend tests (needs cairo through pkg-config)":
   # Under ORC and refc, since the destroy hook's signature differs between
   # them, and under C++, which needs the enum types the bindings declare.
+  fetchFonts()
   for target in ["c", "cpp"]:
     for mm in ["orc", "refc"]:
       exec "nim " & target & " -r --hints:off --mm:" & mm &
@@ -46,6 +60,7 @@ task samples, "Render the sample scenes with every backend that can run here int
       " -d:pollockCairo"
     else:
       ""
+  fetchFonts()
   exec "nim r -d:release --hints:off" & cairo & " tools/rendersamples.nim out"
 
 task window, "Open the example scenes in a native window (needs SDL3)":
@@ -59,7 +74,10 @@ task window, "Open the example scenes in a native window (needs SDL3)":
       " -d:pollockCairo"
     else:
       ""
+  fetchFonts()
   exec "nim r -d:release --hints:off" & cairo & " examples/window.nim"
 
 task goldens, "Rewrite the golden files in tests/golden from the current output":
+  fetchFonts()
   exec "nim r --hints:off -d:pollockUpdateGoldens tests/tsamples.nim"
+  exec "nim r --hints:off -d:pollockUpdateGoldens tests/ttext.nim"

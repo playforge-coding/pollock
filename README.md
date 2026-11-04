@@ -1,11 +1,11 @@
 # pollock
 
-An abstract 2D graphics API for Nim, in the spirit of [piet](https://github.com/linebender/piet). You draw paths, shapes, gradients, clips and images against one API, and a backend turns that into a native renderer's calls.
+An abstract 2D graphics API for Nim, in the spirit of [piet](https://github.com/linebender/piet). You draw paths, shapes, gradients, clips, images and text against one API, and a backend turns that into a native renderer's calls.
 
 **Documentation: [playforge-coding.github.io/pollock](https://playforge-coding.github.io/pollock/)**
 
 > [!WARNING]
-> pollock is young. The API, the two pure-Nim backends (CPU and SVG) and the Cairo backend work; the other native backends and text are still to come. See the [roadmap](https://playforge-coding.github.io/pollock/roadmap/).
+> pollock is young. The API, the two pure-Nim backends (CPU and SVG) and the Cairo backend work. Text is in its first form (one line with kerning, from TrueType and CFF fonts, drawn as outlines); shaping beyond that, line breaking and the other native backends are still to come. See the [roadmap](https://playforge-coding.github.io/pollock/roadmap/).
 
 ```nim
 import pollock
@@ -21,7 +21,7 @@ writePng(ctx.toImage(), "out.png")
 
 - One drawing API over any backend: a `RenderContext` is a Nim concept, so calls dispatch statically and a backend can live in any package.
 - Backends in the repository: a CPU rasterizer and an SVG writer, both pure Nim and running on all of Nim's targets (C, C++, Objective-C and JavaScript), and a Cairo backend for the C, C++ and Objective-C targets. Core Graphics, Direct2D and WebGL2 are planned.
-- Geometry (points, rectangles, affine transforms, Bezier paths, flattening, stroke expansion), colors, gradients and PNG reading and writing, with no dependencies.
+- Geometry (points, rectangles, arcs, affine transforms, Bezier paths, flattening, stroke expansion), colors, gradients, PNG reading and writing, and an OpenType font reader for text, with no dependencies.
 
 ## Building
 

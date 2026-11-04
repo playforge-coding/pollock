@@ -13,8 +13,9 @@ Finished items stay in their section with a check mark, so each section shows ho
 - [x] Sample scenes and golden tests.
 - [x] Arcs and elliptical arcs as path elements.
 - [x] Exact bounding boxes for curves.
-- [ ] Text: the `TextEngine` concept, `GlyphRun`, the `drawGlyphs` primitive, layouts with ranged attributes, hit testing. Engines and backends combine freely; see the [text design](architecture.md#text-planned). The API grows only as fast as every engine and backend can implement it.
-- [ ] A shared glyph cache, so every backend can draw text with the primitives it already has: outlines and color layers with `fillPath`, bitmap glyphs with `drawImage`.
+- [x] Text: the `TextEngine` concept, `GlyphRun`, the `drawGlyphs` primitive, single-style layouts with metrics. Engines and backends combine freely; see the [text design](architecture.md#text). The API grows only as fast as every engine and backend can implement it.
+- [ ] Text: layouts with ranged attributes, line breaking, hit testing.
+- [x] A shared glyph cache, so every backend can draw text with the primitives it already has: outlines and color layers with `fillPath`, bitmap glyphs with `drawImage`.
 - [ ] Color glyphs: COLR layers, sbix and CBDT bitmaps.
 - [ ] The `RasterContext` concept, shared by the backends that render into memory.
 - [ ] A type-erased `DynContext` for choosing a backend at runtime.
@@ -25,11 +26,13 @@ Finished items stay in their section with a check mark, so each section shows ho
 - [x] Recording backend.
 - [x] CPU backend: fills, strokes, clips, gradients, images, exact-area antialiasing.
 - [x] SVG backend: everything the CPU backend does, as a document.
-- [ ] Pure Nim text engine (`opentype`): OpenType parsing, shaping for Latin, Greek and Cyrillic, bidirectional text, line breaking.
+- [x] Pure Nim text engine (`opentype`): OpenType parsing (TrueType and CFF outlines, the character map, metrics) and pair kerning from `GPOS`.
+- [ ] Pure Nim text engine: CID-keyed CFF, CFF2, variable fonts, the legacy `kern` table.
+- [ ] Pure Nim text engine: shaping for Latin, Greek and Cyrillic (`GSUB` ligatures and substitutions, mark placement), bidirectional text, line breaking.
 - [ ] HarfBuzz as a shaper for the pure Nim engine: the native library under C, C++ and Objective-C, harfbuzzjs (WebAssembly) under JavaScript, so that every script works on every target.
 - [ ] Pure Nim text engine: complex scripts in the Nim shaper.
-- [ ] CPU backend: text, by filling glyph outlines.
-- [ ] SVG backend: text as glyph paths.
+- [x] CPU backend: text, by filling glyph outlines.
+- [x] SVG backend: text as glyph paths.
 - [ ] SVG backend: `<text>` elements as an option, for selectable text.
 
 ## Native backends and engines

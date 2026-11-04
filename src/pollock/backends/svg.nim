@@ -8,28 +8,51 @@
 ## `<defs>` with `userSpaceOnUse`
 ## coordinates, which SVG resolves in the referencing element's own space,
 ## so they line up with the element's transform. Images are embedded as PNG
-## data URIs.
+## data URIs. Text is one `<path>` per glyph from the engine's outlines.
+##
+## The context is generic over its text engine: `SvgContext` pairs it with
+## the default engine, and `newSvgContext(width, height, engine)` makes an
+## `SvgContextOf` over any other.
 
-import std/[base64, math, strutils]
+import std/[base64, math, strutils, tables]
 import ../[context, png]
 
 export context
+
+importTextEngine()
 
 type
   SvgState = object
     transform: Affine
     clips: seq[string] ## Ids of the open `<g clip-path>` groups, outermost first.
 
-  SvgContext* = object
+  SvgContextOf*[E] = object
     width*, height*: float64
+    engine*: E ## The text engine whose glyphs it draws.
     defs: seq[string]
     body: seq[string]
+    gradients: Table[string, string]
+      ## The markup of each gradient already in `defs`, without its id, to the id.
     state: SvgState
     stack: seq[SvgState]
     nextId: int
 
+  SvgContext* = SvgContextOf[typeof(defaultTextEngine())]
+    ## The SVG backend with the default text engine.
+
+proc newSvgContext*[E](width, height: float64, engine: E): SvgContextOf[E] =
+  ## A document of the given size in user units, drawing text with `engine`.
+  SvgContextOf[E](
+    width: width,
+    height: height,
+    engine: engine,
+    state: SvgState(transform: affineIdentity),
+  )
+
 proc newSvgContext*(width, height: float64): SvgContext =
-  SvgContext(width: width, height: height, state: SvgState(transform: affineIdentity))
+  ## A document of the given size in user units, with the default text
+  ## engine.
+  newSvgContext(width, height, defaultTextEngine())
 
 func fmt(x: float64): string =
   ## Short decimal: integers without a point, otherwise rounded to about
@@ -85,7 +108,7 @@ func spreadMethod(e: Extend): string =
   of exRepeat: "repeat"
   of exReflect: "reflect"
 
-proc newId(ctx: var SvgContext, prefix: string): string =
+proc newId[E](ctx: var SvgContextOf[E], prefix: string): string =
   inc ctx.nextId
   prefix & $ctx.nextId
 
@@ -98,7 +121,37 @@ proc stopsMarkup(stops: seq[GradientStop]): string =
       result.add " stop-opacity=\"" & fmt(s.color.a) & "\""
     result.add "/>"
 
-proc paintAttrs(ctx: var SvgContext, paint: Paint, attr: string): string =
+proc gradientId[E](ctx: var SvgContextOf[E], paint: Paint): string =
+  ## The id of the gradient's definition, added to `defs` the first time
+  ## the paint is used, so text (one path per glyph) doesn't repeat it.
+  ## Gradients are looked up by their markup without the id, so paints that
+  ## would be written the same way share a definition.
+  var element, markup: string
+  case paint.kind
+  of pkLinearGradient:
+    element = "linearGradient"
+    markup =
+      " gradientUnits=\"userSpaceOnUse\" x1=\"" & fmt(paint.start.x) & "\" y1=\"" &
+      fmt(paint.start.y) & "\" x2=\"" & fmt(paint.stop.x) & "\" y2=\"" &
+      fmt(paint.stop.y) & "\" spreadMethod=\"" & spreadMethod(paint.linearExtend) & "\">" &
+      stopsMarkup(paint.linearStops)
+  of pkRadialGradient:
+    element = "radialGradient"
+    markup =
+      " gradientUnits=\"userSpaceOnUse\" cx=\"" & fmt(paint.center.x) & "\" cy=\"" &
+      fmt(paint.center.y) & "\" r=\"" & fmt(max(0.0, paint.radius)) &
+      "\" spreadMethod=\"" & spreadMethod(paint.radialExtend) & "\">" &
+      stopsMarkup(paint.radialStops)
+  of pkSolid:
+    return ""
+  let key = element & markup
+  result = ctx.gradients.getOrDefault(key)
+  if result.len == 0:
+    result = ctx.newId("g")
+    ctx.defs.add "<" & element & " id=\"" & result & "\"" & markup & "</" & element & ">"
+    ctx.gradients[key] = result
+
+proc paintAttrs[E](ctx: var SvgContextOf[E], paint: Paint, attr: string): string =
   ## `fill="..."` or `stroke="..."` plus the matching opacity attribute,
   ## defining a gradient when needed.
   case paint.kind
@@ -106,27 +159,13 @@ proc paintAttrs(ctx: var SvgContext, paint: Paint, attr: string): string =
     result = " " & attr & "=\"" & colorHex(paint.color) & "\""
     if paint.color.a < 1.0:
       result.add " " & attr & "-opacity=\"" & fmt(paint.color.a) & "\""
-  of pkLinearGradient:
-    let id = ctx.newId("g")
-    ctx.defs.add "<linearGradient id=\"" & id &
-      "\" gradientUnits=\"userSpaceOnUse\" x1=\"" & fmt(paint.start.x) & "\" y1=\"" &
-      fmt(paint.start.y) & "\" x2=\"" & fmt(paint.stop.x) & "\" y2=\"" &
-      fmt(paint.stop.y) & "\" spreadMethod=\"" & spreadMethod(paint.linearExtend) & "\">" &
-      stopsMarkup(paint.linearStops) & "</linearGradient>"
-    result = " " & attr & "=\"url(#" & id & ")\""
-  of pkRadialGradient:
-    let id = ctx.newId("g")
-    ctx.defs.add "<radialGradient id=\"" & id &
-      "\" gradientUnits=\"userSpaceOnUse\" cx=\"" & fmt(paint.center.x) & "\" cy=\"" &
-      fmt(paint.center.y) & "\" r=\"" & fmt(max(0.0, paint.radius)) &
-      "\" spreadMethod=\"" & spreadMethod(paint.radialExtend) & "\">" &
-      stopsMarkup(paint.radialStops) & "</radialGradient>"
-    result = " " & attr & "=\"url(#" & id & ")\""
+  of pkLinearGradient, pkRadialGradient:
+    result = " " & attr & "=\"url(#" & ctx.gradientId(paint) & ")\""
 
-proc openClip(ctx: var SvgContext, id: string) =
+proc openClip[E](ctx: var SvgContextOf[E], id: string) =
   ctx.body.add "<g clip-path=\"url(#" & id & ")\">"
 
-proc clear*(ctx: var SvgContext, color: Color) =
+proc clear*[E](ctx: var SvgContextOf[E], color: Color) =
   ## Paints the whole picture, ignoring the clip: the open clip groups are
   ## closed around the rectangle and reopened after it.
   let attrs = ctx.paintAttrs(solid(color), "fill")
@@ -137,7 +176,9 @@ proc clear*(ctx: var SvgContext, color: Color) =
   for id in ctx.state.clips:
     ctx.openClip(id)
 
-proc fillPath*(ctx: var SvgContext, path: BezPath, paint: Paint, rule: FillRule) =
+proc fillPath*[E](
+    ctx: var SvgContextOf[E], path: BezPath, paint: Paint, rule: FillRule
+) =
   var el = "<path d=\"" & pathData(path) & "\"" & ctx.paintAttrs(paint, "fill")
   if rule == frEvenOdd:
     el.add " fill-rule=\"evenodd\""
@@ -145,7 +186,9 @@ proc fillPath*(ctx: var SvgContext, path: BezPath, paint: Paint, rule: FillRule)
   el.add "/>"
   ctx.body.add el
 
-proc strokePath*(ctx: var SvgContext, path: BezPath, paint: Paint, style: StrokeStyle) =
+proc strokePath*[E](
+    ctx: var SvgContextOf[E], path: BezPath, paint: Paint, style: StrokeStyle
+) =
   var el =
     "<path d=\"" & pathData(path) & "\" fill=\"none\"" & ctx.paintAttrs(paint, "stroke")
   el.add " stroke-width=\"" & fmt(style.width) & "\""
@@ -181,7 +224,7 @@ proc strokePath*(ctx: var SvgContext, path: BezPath, paint: Paint, style: Stroke
   el.add "/>"
   ctx.body.add el
 
-proc clipPath*(ctx: var SvgContext, path: BezPath, rule: FillRule) =
+proc clipPath*[E](ctx: var SvgContextOf[E], path: BezPath, rule: FillRule) =
   let id = ctx.newId("c")
   var inner = "<path d=\"" & pathData(path) & "\""
   if rule == frEvenOdd:
@@ -192,10 +235,10 @@ proc clipPath*(ctx: var SvgContext, path: BezPath, rule: FillRule) =
   ctx.openClip(id)
   ctx.state.clips.add id
 
-proc save*(ctx: var SvgContext) =
+proc save*[E](ctx: var SvgContextOf[E]) =
   ctx.stack.add ctx.state
 
-proc restore*(ctx: var SvgContext) =
+proc restore*[E](ctx: var SvgContextOf[E]) =
   if ctx.stack.len == 0:
     return
   let prev = ctx.stack.pop()
@@ -203,14 +246,14 @@ proc restore*(ctx: var SvgContext) =
     ctx.body.add "</g>"
   ctx.state = prev
 
-proc transform*(ctx: var SvgContext, affine: Affine) =
+proc transform*[E](ctx: var SvgContextOf[E], affine: Affine) =
   ctx.state.transform = ctx.state.transform * affine
 
-proc currentTransform*(ctx: SvgContext): Affine =
+proc currentTransform*[E](ctx: SvgContextOf[E]): Affine =
   ctx.state.transform
 
-proc drawImage*(
-    ctx: var SvgContext, image: ImageData, dst: Rect, interp: Interpolation
+proc drawImage*[E](
+    ctx: var SvgContextOf[E], image: ImageData, dst: Rect, interp: Interpolation
 ) =
   if image.isEmpty:
     return
@@ -223,10 +266,14 @@ proc drawImage*(
   el.add " href=\"data:image/png;base64," & encode(encodePng(image)) & "\"/>"
   ctx.body.add el
 
-proc finish*(ctx: var SvgContext): RenderResult =
+proc drawGlyphs*[E](ctx: var SvgContextOf[E], run: GlyphRun, paint: Paint) =
+  ## One path per glyph, from the engine's outlines.
+  ctx.drawGlyphsAsPaths(ctx.engine, run, paint)
+
+proc finish*[E](ctx: var SvgContextOf[E]): RenderResult =
   success()
 
-proc toSvg*(ctx: SvgContext): string =
+proc toSvg*[E](ctx: SvgContextOf[E]): string =
   ## The document so far. Clips still open are closed in the output.
   result =
     "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"" & fmt(ctx.width) &
