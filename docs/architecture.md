@@ -21,7 +21,7 @@ flowchart TD
   cairo --> libcairo[libcairo]
 ```
 
-- The **value types** know nothing about backends: `geometry` (points, rectangles, shapes, affine transforms, Bezier paths, flattening), `color`, `paint`, `stroke` (styles and stroke expansion) and `image`.
+- The **value types** know nothing about backends: `geometry` (points, rectangles, shapes, affine transforms, Bezier paths with arcs, flattening, exact bounding boxes), `color`, `paint`, `stroke` (styles and stroke expansion) and `image`.
 - `context` defines the `RenderContext` concept, the ten primitives every backend implements, and re-exports the value types so a backend imports one module.
 - `draw` is the high-level API, generic over any `RenderContext`. It is the only layer most users touch.
 - Backends implement the concept. Each one is a module under `backends/`, except `recording`, which is part of the core because tests of the high-level API need it.
@@ -33,6 +33,14 @@ flowchart TD
 A concept gives static dispatch: `fill[C: RenderContext](ctx: var C, ...)` is instantiated per backend, and the backend's `fillPath` is called directly. There is no vtable, no `ref object` hierarchy and no runtime cost over calling the backend by hand, and a backend can be defined in any package, since the concept only asks for procs with the right signatures. The price is that drawing code has to be generic (or import one concrete backend), and that concept mismatch errors are less readable than inheritance errors; the `static: doAssert X is RenderContext` at the end of every backend catches mistakes early where the message is clearest.
 
 The primitives are named `fillPath`, `strokePath` and `clipPath` rather than `fill`, `stroke` and `clip` so that the generic helpers in `draw` can carry the short names without the concept ever matching the helpers themselves.
+
+## Arcs
+
+A path element can be an elliptical arc, stored the way SVG's `A` command gives it (radii, the rotation of the ellipse, the large-arc and sweep flags, and the end point) rather than as a center and angles. That form is what SVG, Canvas and most drawing code hand over, it needs no start point of its own, and SVG output can copy it. The center form (`Arc`) exists for the shape and for the math: `toArc` does SVG's endpoint-to-center conversion, with the radii correction for points too far apart, and everything else works from that.
+
+Arcs survive `transform`: the affine image of an ellipse is an ellipse, so the transformed element's radii are the singular values of the linear part composed with the ellipse's own `rotate * scale`, its rotation comes from the first singular vector, and a reflection flips the sweep flag. The radii correction commutes with the transform, since the chord is transformed along with the ellipse. The CPU backend therefore transforms paths exactly and only approximates when it flattens, which samples the ellipse's parameter at a step chosen so the chords stay within the tolerance for the larger radius. Backends whose native paths have no elliptical arcs (Cairo) ask `toCubics` for cubics, one per quarter turn at most.
+
+`boundingBox` of a path is exact: for quadratic and cubic curves it solves the derivative for each axis and takes the points at the roots inside the segment, and for arcs it takes the points where the ellipse's tangent is horizontal or vertical when they lie on the arc.
 
 ## The CPU rasterizer
 

@@ -385,6 +385,21 @@ proc buildPath(ctx: var CairoContext, path: BezPath) =
         el.cubicEnd.y,
       )
       current = el.cubicEnd
+    of peArcTo:
+      # Cairo's arcs are circular and about a center, so elliptical ones go
+      # in as cubics (which is what Cairo makes of its own arcs anyway).
+      for piece in el.toCubics(current):
+        case piece.kind
+        of peCubicTo:
+          cairoCurveTo(
+            ctx.cr, piece.ctrl1.x, piece.ctrl1.y, piece.ctrl2.x, piece.ctrl2.y,
+            piece.cubicEnd.x, piece.cubicEnd.y,
+          )
+        of peLineTo:
+          cairoLineTo(ctx.cr, piece.to.x, piece.to.y)
+        else:
+          discard
+      current = el.arcEnd
     of peClosePath:
       cairoClosePath(ctx.cr)
       current = start

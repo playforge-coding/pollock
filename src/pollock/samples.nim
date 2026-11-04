@@ -11,7 +11,8 @@ export draw
 const
   sampleWidth* = 400
   sampleHeight* = 300
-  sampleNames* = ["shapes", "strokes", "gradients", "clipping", "fillrules", "images"]
+  sampleNames* =
+    ["shapes", "strokes", "gradients", "clipping", "fillrules", "images", "arcs"]
 
 func checkerboard*(cells, cellSize: int, a, b: Color): ImageData =
   ## A square test image.
@@ -179,6 +180,78 @@ proc sampleImages[C: RenderContext](ctx: var C) =
       photo[x, y] = rgb(x.float64 / 3, y.float64 / 3, 0.5)
   ctx.drawImage(photo, rect(220, 200, 380, 290), ipBilinear)
 
+proc sampleArcs[C: RenderContext](ctx: var C) =
+  ctx.clear(rgb8(252, 250, 245))
+  let palette = [
+    rgb8(230, 90, 70),
+    rgb8(250, 180, 60),
+    rgb8(90, 170, 110),
+    rgb8(70, 130, 210),
+    rgb8(140, 90, 180),
+  ]
+  # A pie chart: each wedge is a line out, an arc and a line back. The arc
+  # has to be the long way around once a share passes a half.
+  let hub = point(100, 95)
+  var angle = -PI / 2
+  for i, share in [0.34, 0.26, 0.18, 0.13, 0.09]:
+    let sweep = share * 2 * PI
+    var wedge = newPath()
+    wedge.moveTo hub
+    wedge.lineTo hub + vec2(cos(angle), sin(angle)) * 70
+    wedge.arcTo(
+      70.0,
+      hub + vec2(cos(angle + sweep), sin(angle + sweep)) * 70,
+      largeArc = sweep > PI,
+    )
+    wedge.closePath()
+    ctx.fill(wedge, palette[i])
+    ctx.stroke(wedge, white, 2.0)
+    angle += sweep
+  # The four arcs through the same two points: two ellipses, each cut in
+  # two by the points, picked by the large-arc and sweep flags.
+  let a = point(235, 55)
+  let b = point(335, 105)
+  for i, flags in [(false, false), (false, true), (true, false), (true, true)]:
+    var p = newPath()
+    p.moveTo a
+    p.arcTo(vec2(70, 40), -PI / 9, flags[0], flags[1], b)
+    ctx.stroke(p, palette[i], strokeStyle(width = 3))
+  ctx.fill(circle(a, 4), black)
+  ctx.fill(circle(b, 4), black)
+  # Arc shapes: a gauge with round caps, and a whole tilted ellipse (two arc
+  # elements) with a dash pattern running along it.
+  let dial = point(100, 235)
+  ctx.stroke(
+    arc(dial, 50, 0.75 * PI, 1.5 * PI),
+    rgb8(220, 220, 215),
+    strokeStyle(width = 14, cap = lcRound),
+  )
+  ctx.stroke(
+    arc(dial, 50, 0.75 * PI, 0.95 * PI),
+    palette[3],
+    strokeStyle(width = 14, cap = lcRound),
+  )
+  ctx.stroke(
+    arc(dial, vec2(80, 32), 0, 2 * PI, PI / 6),
+    rgb8(60, 60, 60),
+    strokeStyle(width = 1.5, dashes = [6.0, 4.0]),
+  )
+  # Arcs under a transform: the ellipses are transformed, not approximated
+  # first. A ring from two whole circles with the even-odd rule, and a leaf
+  # from two arcs that both turn clockwise.
+  let eye = point(300, 225)
+  ctx.withTransform(rotateAbout(PI / 8, eye)):
+    var ring = arc(eye, 62, 0, 2 * PI).toPath
+    ring.extend arc(eye, 54, 0, 2 * PI).toPath
+    ctx.fill(ring, rgb8(240, 200, 120), frEvenOdd)
+    var leaf = newPath()
+    leaf.moveTo eye - vec2(45, 0)
+    leaf.arcTo(vec2(55, 30), 0.0, false, true, eye + vec2(45, 0))
+    leaf.arcTo(vec2(55, 30), 0.0, false, true, eye - vec2(45, 0))
+    leaf.closePath()
+    ctx.fill(leaf, palette[2].withAlpha(0.85))
+    ctx.stroke(leaf, rgb8(40, 90, 60), 2.0)
+
 proc drawSample*[C: RenderContext](ctx: var C, index: int) =
   ## Draws sample `index` (see `sampleNames`) on any backend.
   case index
@@ -194,5 +267,7 @@ proc drawSample*[C: RenderContext](ctx: var C, index: int) =
     ctx.sampleFillRules()
   of 5:
     ctx.sampleImages()
+  of 6:
+    ctx.sampleArcs()
   else:
     raise newException(IndexDefect, "no sample " & $index)

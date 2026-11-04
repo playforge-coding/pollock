@@ -15,7 +15,8 @@ A shape is anything with `toPath` and `boundingBox`. These come with pollock:
 | `Circle` | `circle(center, radius)`, `circle(x, y, radius)` |
 | `Ellipse` | `ellipse(center, rx, ry)` |
 | `Line` | `line(p0, p1)`, `line(x0, y0, x1, y1)` |
-| `BezPath` | `newPath()` then `moveTo`, `lineTo`, `quadTo`, `cubicTo`, `closePath`; `polygonPath(points)` |
+| `Arc` | `arc(center, radius, startAngle, sweepAngle)`, `arc(center, radii, startAngle, sweepAngle, rotation = 0)` |
+| `BezPath` | `newPath()` then `moveTo`, `lineTo`, `quadTo`, `cubicTo`, `arcTo`, `closePath`; `polygonPath(points)` |
 
 A `BezPath` is a sequence of `PathEl` values. Build one like this:
 
@@ -25,12 +26,19 @@ p.moveTo 10, 10
 p.lineTo 100, 10
 p.quadTo point(120, 50), point(100, 90)
 p.cubicTo point(80, 120), point(30, 120), point(10, 90)
+p.arcTo 40.0, point(10, 10)
 p.closePath()
 ```
 
 A subpath that is only a `moveTo` draws nothing. One whose segment has zero length (`moveTo p` then `lineTo p`) draws a dot when stroked with round or square caps, as in SVG.
 
-`extend` appends one path to another, which is how you make a path with several subpaths (rings, holes). `transform(affine, path)` returns a transformed copy, `boundingBox` the box around the control points, `flatten(path, tolerance)` the polylines within `tolerance` of the curves, and `area` the signed area.
+`extend` appends one path to another, which is how you make a path with several subpaths (rings, holes). `transform(affine, path)` returns a transformed copy, `boundingBox` the exact bounds of the curves, `flatten(path, tolerance)` the polylines within `tolerance` of the curves, and `area` the signed area.
+
+### Arcs
+
+`arcTo(radii, rotation, largeArc, sweep, to)` adds an elliptical arc the way SVG's `A` command does: from the current point to `to`, along an ellipse with `radii` whose x axis is turned by `rotation` radians. Two ellipses of that shape pass through both points, and each is cut in two by them, so four arcs are possible: `largeArc` picks the longer ones and `sweep` the one that turns clockwise on screen (the positive angle direction). Radii too small to reach both points are scaled up until they just do, so `arcTo(radius, to)`, the circular shorthand, draws a half circle when the radius is half the distance. A zero radius draws a straight line, and an arc that ends exactly where it starts draws nothing. Arcs stay arcs under `transform`, and the SVG backend writes them as they are.
+
+An `Arc` is the shape form, in center parameterization: `arc(center, radius, startAngle, sweepAngle)` is the piece of the circle from `startAngle` through `sweepAngle` (a negative sweep goes the other way, and `2 * PI` is the whole circle). The elliptical form takes `radii` and the ellipse's `rotation`. Angles are the ellipse's parameter, so `pointAt(arc, angle)` is `center + rotate(rotation) * (rx * cos(angle), ry * sin(angle))`; `startPoint` and `endPoint` are the ends. `toArc(el, start)` converts an arc element into an `Arc`, and `toCubics` turns an `Arc`, an element or a whole path's arcs into cubic curves, for code that only handles those.
 
 Rectangles have the usual helpers: `width`, `height`, `size`, `origin`, `center`, `union`, `intersect`, `contains`, `inflate`, `inset`, `translate`, `normalized`, `roundOut`, `isEmpty`.
 
