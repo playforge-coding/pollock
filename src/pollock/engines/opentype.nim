@@ -55,6 +55,7 @@ type
     format: int ## 4 or 12; 0 before it is read.
     at: int ## The first array: the end codes (format 4) or the groups (format 12).
     count: int ## Segments or groups.
+    limit: int ## Format 4: where the subtable, and so its glyph array, ends.
 
   CffFont = object
     charStrings: seq[(int, int)] ## Offset and length of each glyph's charstring.
@@ -195,12 +196,20 @@ func advance(f: ParsedFont, glyph: GlyphId): int =
 
 # Character map
 
-proc readCmapFormat4(f: ParsedFont, sub: int) =
+proc readCmapFormat4(f: ParsedFont, sub, available: int) =
   # Four arrays of `segCount` 16-bit values (end codes, start codes, deltas
-  # and range offsets) with a reserved field after the first.
+  # and range offsets) with a reserved field after the first. The glyph array
+  # follows them and ends with the subtable: at its length, unless that is
+  # too small to hold the arrays or runs past the room it has.
   let segCountX2 = f.data.u16(sub + 6)
   f.data.check(sub + 14, segCountX2 * 4 + 2)
-  f.cmap = CharMap(format: 4, at: sub + 14, count: segCountX2 div 2)
+  let length = f.data.u16(sub + 2)
+  let limit =
+    if length >= 16 + segCountX2 * 4:
+      min(sub + length, available)
+    else:
+      available
+  f.cmap = CharMap(format: 4, at: sub + 14, count: segCountX2 div 2, limit: limit)
 
 proc readCmapFormat12(f: ParsedFont, sub: int) =
   # Groups of start code, end code and start glyph, 32 bits each. Every field
@@ -240,7 +249,13 @@ proc readCmap(f: ParsedFont) =
   if bestScore == 2:
     f.readCmapFormat12(best)
   else:
-    f.readCmapFormat4(best)
+    # All the room it has: up to the next subtable or the end of the table.
+    var available = cmap + f.tables["cmap"][1]
+    for i in 0 ..< numTables:
+      let offset = cmap + f.data.offset32(cmap + 4 + i * 8 + 4)
+      if offset > best and offset < available:
+        available = offset
+    f.readCmapFormat4(best, available)
 
 func glyphFor(f: ParsedFont, c: int): GlyphId =
   ## Looks the character up with a binary search, as the spec intends: the
@@ -276,9 +291,9 @@ func glyphFor(f: ParsedFont, c: int): GlyphId =
       g = (c + delta) and 0xFFFF
     else:
       # An index into the glyph array that follows, which is only checked
-      # here: an entry past the end of the data maps to nothing.
+      # here: an entry past the end of the subtable maps to nothing.
       let at = rangeOffsets + lo * 2 + rangeOffset + (c - startCode) * 2
-      if at + 2 > f.data.len:
+      if at + 2 > m.limit:
         return notdef
       g = f.data.u16(at)
       if g != 0:

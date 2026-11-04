@@ -84,6 +84,50 @@ suite "opentype internals":
     check f.glyphFor(0xFFFF) == notdef
     check f.glyphFor(0x1F600) == notdef
 
+  test "a format 4 glyph array stops where its subtable does":
+    # 40 bytes of header and arrays, whose second segment (a and b) reads the
+    # glyph array right after them. Every case below puts a 20 there.
+    func format4(length: int): seq[uint8] =
+      result = be16(4) & be16(length) & be16(0) & be16(6) & be16(0) & be16(0) & be16(0)
+      result.add be16(0x43) & be16(0x62) & be16(0xFFFF) & be16(0)
+      result.add be16(0x41) & be16(0x61) & be16(0xFFFF)
+      result.add be16((5 - 0x41) and 0xFFFF) & be16(0) & be16(1)
+      result.add be16(0) & be16(4) & be16(0)
+    let glyph = be16(20) & be16(0)
+    proc lookup(cmap: seq[uint8], tableLength: int): GlyphId =
+      let f = ParsedFont(data: cmap, tables: {"cmap": (0, tableLength)}.toTable)
+      f.readCmap()
+      check f.glyphFor(0x41) == GlyphId(5) # segments by delta are unaffected
+      f.glyphFor(0x61)
+
+    let header = be16(0) & be16(1) & be16(3) & be16(1) & be32(12)
+
+    # A length that holds the array reaches it, one that doesn't stops short.
+    let whole = header & format4(44) & glyph
+    check lookup(whole, whole.len) == GlyphId(20)
+    let short = header & format4(40) & glyph
+    check lookup(short, short.len) == notdef
+
+    # A length too small to be true falls back to the end of the table, so
+    # what follows the table is out of reach.
+    let unknown = header & format4(0) & glyph
+    check lookup(unknown, unknown.len) == GlyphId(20)
+    check lookup(unknown, 52) == notdef
+
+    # And to the next subtable, wherever its record is listed.
+    let records = be16(0) & be16(2) & be16(1) & be16(0) & be32(60)
+    let next = records & be16(3) & be16(1) & be32(20) & format4(0) & glyph
+    check lookup(next, next.len) == notdef
+
+    # Two records naming one subtable don't cut it off.
+    let shared = be16(0) & be16(2) & be16(0) & be16(3) & be32(20)
+    let both = shared & be16(3) & be16(1) & be32(20) & format4(0) & glyph
+    check lookup(both, both.len) == GlyphId(20)
+
+    # A length past the next subtable doesn't reach into it either.
+    let long = records & be16(3) & be16(1) & be32(20) & format4(44) & glyph
+    check lookup(long, long.len) == notdef
+
   test "overlapping character map groups cost nothing up front":
     # Two thousand groups that each claim every code point. The groups are
     # looked up as they are, not expanded into a table of a billion entries.
